@@ -22,6 +22,22 @@ from config.config import SERPAPI_API_KEY, SERPAPI_BASE_URL
 logger = logging.getLogger("lungo.travel.serpapi_tools")
 
 
+async def _request_search(params: dict) -> dict:
+    """Never include an authenticated request URL in errors or logs."""
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(SERPAPI_BASE_URL, params=params)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(f"SerpAPI returned HTTP {exc.response.status_code}. Check SERPAPI_API_KEY and account quota.") from None
+    except httpx.HTTPError:
+        raise RuntimeError("SerpAPI could not be reached. Please retry.") from None
+    if "error" in data:
+        raise RuntimeError("SerpAPI rejected the search. Check the location, dates, API key, and account quota.")
+    return data
+
+
 async def search_flights(
     origin: str,
     destination: str,
@@ -103,10 +119,7 @@ async def search_flights(
     
     try:
         # Make async HTTP request to SerpAPI for outbound flights
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(SERPAPI_BASE_URL, params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await _request_search(params)
         
         # Check for API errors in response
         if "error" in data:
@@ -127,20 +140,21 @@ async def search_flights(
         
         logger.info(f"Found {len(all_flights)} outbound flights")
         
-        # Fetch return flight options if requested (only for round-trip flights)
-        # This makes a separate search for the return leg to get actual return times
-        # Skip for one-way flights (is_one_way=True or no return_date)
-        if include_return_flights and all_flights and return_date and not is_one_way:
-            return_flights = await _search_return_flights(
-                destination, origin, return_date
-            )
-            
-            # Match return flights to outbound flights by airline if possible
-            for flight in all_flights:
-                flight["return_flight"] = _find_best_return_flight(
-                    flight, return_flights
-                )
-        
+        # Retrieve return legs for the actual selected outbound itinerary.
+        # An unrelated one-way search cannot establish a round-trip fare.
+        if not is_one_way:
+            for flight in sorted(all_flights, key=lambda item: item["price"])[:3]:
+                token = flight.get("departure_token")
+                if not token:
+                    continue
+                return_data = await _request_search({**params, "departure_token": token})
+                options = return_data.get("best_flights", []) + return_data.get("other_flights", [])
+                options = [parsed for option in options if (parsed := _parse_return_flight(option)) and parsed.get("price", 0) > 0]
+                if options:
+                    selected = min(options, key=lambda item: item["price"])
+                    flight["return_flight"] = selected
+                    flight["price"] = selected["price"]
+
         return all_flights
         
     except httpx.HTTPError as e:
@@ -181,10 +195,7 @@ async def _search_return_flights(
     }
     
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(SERPAPI_BASE_URL, params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await _request_search(params)
         
         if "error" in data:
             logger.warning(f"SerpAPI error for return flights: {data['error']}")
@@ -312,6 +323,8 @@ def _parse_flight(flight_group: dict) -> Optional[dict]:
         
         # Get price from flight group
         price = flight_group.get("price", 0)
+        if not isinstance(price, (int, float)) or price <= 0:
+            return None
         
         # First flight is departure, last flight is arrival at destination
         first_flight = flights[0]
@@ -355,6 +368,7 @@ def _parse_flight(flight_group: dict) -> Optional[dict]:
         
         return {
             "price": price,
+            "departure_token": flight_group.get("departure_token"),
             # Outbound flight details
             "departure_time": departure_time,
             "departure_code": departure_code,
@@ -426,10 +440,7 @@ async def search_hotels(
     
     try:
         # Make async HTTP request to SerpAPI
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(SERPAPI_BASE_URL, params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await _request_search(params)
         
         # Check for API errors in response
         if "error" in data:
@@ -442,7 +453,7 @@ async def search_hotels(
         
         for prop in properties:
             # Parse hotel info - price is as-is from API (per-night or total depending on API)
-            hotel_info = _parse_hotel(prop, check_in_date)
+            hotel_info = _parse_hotel(prop, check_in_date, check_out_date)
             if hotel_info:
                 hotels.append(hotel_info)
         
@@ -454,7 +465,7 @@ async def search_hotels(
         raise Exception(f"Failed to search hotels: {e}")
 
 
-def _parse_hotel(property_data: dict, check_in_date: str) -> Optional[dict]:
+def _parse_hotel(property_data: dict, check_in_date: str, check_out_date: str = None) -> Optional[dict]:
     """
     Parse a hotel property from SerpAPI response into a normalized format.
     
@@ -478,17 +489,17 @@ def _parse_hotel(property_data: dict, check_in_date: str) -> Optional[dict]:
         
         # Extract price - may be in different formats
         # SerpAPI returns either 'rate_per_night' or 'total_rate'
-        rate_per_night = property_data.get("rate_per_night", {})
-        price = rate_per_night.get("lowest", 0)
-        
-        # If no rate_per_night, try total_rate
-        if not price:
-            total_rate = property_data.get("total_rate", {})
-            price = total_rate.get("lowest", 0)
-        
-        # Extract numeric price from string if needed (e.g., "$150" -> 150)
-        if isinstance(price, str):
-            price = float(price.replace("$", "").replace(",", "").strip() or 0)
+        nights = (datetime.fromisoformat(check_out_date) - datetime.fromisoformat(check_in_date)).days if check_out_date else 1
+        if nights <= 0:
+            return None
+        def amount(rate):
+            value = rate.get("extracted_lowest", rate.get("lowest", 0)) or 0
+            return float(str(value).replace("$", "").replace(",", "").strip())
+        price = amount(property_data.get("rate_per_night") or {})
+        total_price = amount(property_data.get("total_rate") or {}) or price * nights
+        if total_price <= 0:
+            return None
+        price = price or total_price / nights
         
         # Extract overall rating (1-5 scale)
         overall_rating = property_data.get("overall_rating", 0)
@@ -526,6 +537,9 @@ def _parse_hotel(property_data: dict, check_in_date: str) -> Optional[dict]:
         return {
             "name": name,
             "price": price,
+            "total_price": total_price,
+            "nights": nights,
+            "check_out_date": check_out_date,
             "rating": overall_rating,  # Overall rating (for backward compatibility)
             "overall_rating": overall_rating,  # Explicit overall rating
             "location_rating": location_rating,  # Location-specific rating
@@ -592,10 +606,7 @@ async def search_activities(
     
     try:
         # Make async HTTP request to SerpAPI
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.get(SERPAPI_BASE_URL, params=params)
-            response.raise_for_status()
-            data = response.json()
+        data = await _request_search(params)
         
         # Check for API errors in response
         if "error" in data:

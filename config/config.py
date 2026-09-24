@@ -56,6 +56,7 @@ TRAVEL_HOTEL_CHECKIN_GAP_HOURS = int(os.getenv("TRAVEL_HOTEL_CHECKIN_GAP_HOURS",
 # Logging Configuration
 # =============================================================================
 LOGGING_LEVEL = os.getenv("LOGGING_LEVEL", "INFO").upper()
+TRACING_ENABLED = os.getenv("TRACING_ENABLED", "false").lower() == "true"
 
 # =============================================================================
 # HTTP Server Configuration

@@ -8,23 +8,20 @@ replicaCount: 1
 environment:
 
 image:
-  repository: ghcr.io/agntcy/coffee-agntcy/lungo-ui
+  repository: lungo-ui
   tag: latest
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
   pullSecret:
 
 service:
   port: 3000
 
-config:
-  exchangeAppApiUrl: ""
-  logisticsAppApiUrl: ""
-  grafanaUrl: ""
+# VITE_* URLs are compiled into the image. Rebuild to change them.
 
 # You can use your own config here for service account
 serviceaccount:
   annotations:
-    eks.amazonaws.com/role-arn: REPLACE_WITH_ROLE_ARN
+    {}
 
 # You can use your own ingress stack of operators and letsencrypt mechanism
 ingress:
@@ -51,10 +48,10 @@ ingress:
       annotations: {}
 
 probes:
-  livenessProbeEnabled: false
-  readinessProbeEnabled: false
+  livenessProbeEnabled: true
+  readinessProbeEnabled: true
   port: 3000
-  endpoint: /v1/health
+  endpoint: /
 
 resources:
   enabled: false

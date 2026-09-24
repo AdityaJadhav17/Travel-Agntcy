@@ -1,6 +1,6 @@
 {
   "github": {
-    "baseUrl": "https://github.com/agntcy/coffeeAgntcy/blob/main/coffeeAGNTCY/coffee_agents",
+    "baseUrl": "https://github.com/AdityaJadhav17/Travel-Agntcy/blob/main",
     "appSdkBaseUrl": "https://github.com/agntcy/app-sdk/blob/main/src/agntcy_app_sdk",
     "agents": {
       "supervisorAuction": "/lungo/agents/supervisors/auction/graph/graph.py#L451",

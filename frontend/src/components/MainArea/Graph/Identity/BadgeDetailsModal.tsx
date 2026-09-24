@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { BadgeData } from "./types"
 import { CustomNodeData } from "../Elements/types"
 import { fetchBadgeDetails, IdentityServiceError } from "./IdentityApi"
@@ -35,15 +35,9 @@ const BadgeDetailsModal: React.FC<BadgeDetailsModalProps> = ({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (isOpen && nodeData) {
-      fetchBadgeDetailsData()
-    }
-  }, [isOpen, nodeName, nodeData])
-
   useEscapeKey(isOpen, onClose)
 
-  const fetchBadgeDetailsData = async () => {
+  const fetchBadgeDetailsData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
@@ -59,7 +53,11 @@ const BadgeDetailsModal: React.FC<BadgeDetailsModalProps> = ({
     } finally {
       setLoading(false)
     }
-  }
+  }, [nodeData])
+
+  useEffect(() => {
+    if (isOpen) void fetchBadgeDetailsData()
+  }, [isOpen, fetchBadgeDetailsData])
 
   if (!isOpen) return null
 

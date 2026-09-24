@@ -1,42 +1,42 @@
-opentelemetry-collector:
-  image:
-    repository: otel/opentelemetry-collector-k8s
-  mode: deployment
-
-clickhouse:
-  auth:
-    username: "admin"
-    password: "admin"
-  keeper:
-    enabled: false
-  shards: 1
-  replicaCount: 1
-  image:
-    repository: bitnamilegacy/clickhouse
-    tag: 25.6.4-debian-12-r0
-    pullPolicy: IfNotPresent
-
+# Create this Secret separately; do not put credentials in Helm values.
+existingSecret: travel-agntcy-env
+imagePullPolicy: IfNotPresent
+imagePullSecrets: []
 nats:
-  readinessProbe:
-    httpGet: { path: /healthz, port: 8222 }
-    initialDelaySeconds: 10
-    periodSeconds: 10
-    timeoutSeconds: 2
-    failureThreshold: 6
-  livenessProbe:
-    httpGet: { path: /healthz, port: 8222 }
-    initialDelaySeconds: 20
-    periodSeconds: 20
-    timeoutSeconds: 2
-    failureThreshold: 6
-
-weather-mcp-server:
-  transportServerEndpoint: "nats://lungo-local-cluster-nats:4222"
-  defaultMessageTransport: "NATS"
-  otlpHttpEndpoint: "http://lungo-local-cluster-opentelemetry-collector:4318"
-
-lungo-ui:
-  environment: local
-  config:
-    exchangeAppApiUrl: "http://localhost:30080"
-    logisticsAppApiUrl: "http://localhost:30081"
+  image: nats:2.11-alpine
+service:
+  type: ClusterIP
+apps:
+  flight-agent:
+    image: flight-agent:latest
+    port: 9001
+    healthPath: /.well-known/agent.json
+    env:
+      FLIGHT_AGENT_HOST: "0.0.0.0"
+      FLIGHT_AGENT_PORT: "9001"
+  hotel-agent:
+    image: hotel-agent:latest
+    port: 9002
+    healthPath: /.well-known/agent.json
+    env:
+      HOTEL_AGENT_HOST: "0.0.0.0"
+      HOTEL_AGENT_PORT: "9002"
+  activity-agent:
+    image: activity-agent:latest
+    port: 9003
+    healthPath: /.well-known/agent.json
+    env:
+      ACTIVITY_AGENT_HOST: "0.0.0.0"
+      ACTIVITY_AGENT_PORT: "9003"
+  travel-supervisor:
+    image: travel-supervisor:latest
+    port: 8000
+    nodePort: 30080
+    healthPath: /health
+    env: {}
+  ui:
+    image: lungo-ui:latest
+    port: 3000
+    nodePort: 30083
+    healthPath: /
+    env: {}

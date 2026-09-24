@@ -9,6 +9,7 @@ Uses SerpAPI to search for flights and returns formatted results.
 """
 
 import logging
+import json
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.graph.state import CompiledStateGraph
@@ -103,10 +104,6 @@ class FlightSearchAgent:
                 include_return_flights=not is_one_way,  # Don't fetch return flights for one-way
             )
             
-            if not flights:
-                return {"messages": [AIMessage(
-                    content=f"No flights found from {params['origin']} to {params['destination']}"
-                )]}
             
             # Format the response
             response = self._format_flights_response(flights, params)
@@ -114,7 +111,7 @@ class FlightSearchAgent:
             
         except Exception as e:
             logger.error(f"Error searching flights: {e}")
-            return {"messages": [AIMessage(content=f"Error searching flights: {str(e)}")]}
+            return {"messages": [AIMessage(content=json.dumps({"status": "error", "message": str(e)}))]}
     
     def _parse_request(self, message: str) -> dict:
         """

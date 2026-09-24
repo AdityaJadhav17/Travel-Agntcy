@@ -6,7 +6,7 @@
 export type LogLevel = "debug" | "info" | "warn" | "error"
 
 class Logger {
-  private isDev = process.env.NODE_ENV === "development"
+  private isDev = import.meta.env.DEV
 
   private log(level: LogLevel, message: string, data?: unknown) {
     if (!this.isDev && level === "debug") return

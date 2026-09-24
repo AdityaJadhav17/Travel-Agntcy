@@ -1,29 +1,9 @@
-# Flight Search Agent Dockerfile
-#
-# A2A agent for searching flights using SerpAPI.
-# Based on the original lungo Dockerfile pattern.
-
-FROM python:3.13.0-slim
-
-# Install system dependencies, including ping, curl, and wget
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends git curl wget iputils-ping && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
-
-# Install uv and create virtual environment
-RUN pip install --no-cache-dir uv && \
-    uv venv -q /venv
-ENV PATH="/venv/bin:$PATH"
-
-# Set PYTHONPATH to include the application directory
-ENV PYTHONPATH="/app"
-
+FROM python:3.13-slim
+COPY --from=ghcr.io/astral-sh/uv:0.11.3 /uv /uvx /bin/
 WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONPATH=/app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --locked --no-editable
-
+RUN uv sync --locked --no-install-project
 COPY . .
-
-# Run the flight agent server using uv run (same pattern as original)
-CMD ["uv", "run", "python", "agents/flight/server.py"]
+RUN uv sync --locked
+CMD ["uv", "run", "--no-sync", "python", "-m", "agents.flight.server"]

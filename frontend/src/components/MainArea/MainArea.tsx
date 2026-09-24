@@ -1,9 +1,10 @@
+import { isGroupCommunication } from "@/utils/patternUtils"
 /**
  * Copyright AGNTCY Contributors (https://github.com/agntcy)
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useEffect, useRef, useCallback, useState } from "react"
+import React, { useEffect, useRef, useCallback, useState, useMemo } from "react"
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -79,9 +80,12 @@ const MainArea: React.FC<MainAreaProps> = ({
   const fitViewWithViewport = useViewportAwareFitView()
 
   const isGroupCommConnected =
-    pattern !== "group_communication" || groupCommResponseReceived
+    !isGroupCommunication(pattern) || groupCommResponseReceived
 
-  const config: GraphConfig = getGraphConfig(pattern, isGroupCommConnected)
+  const config: GraphConfig = useMemo(
+    () => getGraphConfig(pattern, isGroupCommConnected),
+    [pattern, isGroupCommConnected],
+  )
 
   const [nodesDraggable, setNodesDraggable] = useState(true)
   const [nodesConnectable, setNodesConnectable] = useState(true)
@@ -128,7 +132,7 @@ const MainArea: React.FC<MainAreaProps> = ({
         data: {
           ...node.data,
           onOpenIdentityModal: handleOpenIdentityModal,
-          isModalOpen: !!(activeModal && activeNodeData?.id === node.id),
+          isModalOpen: false,
         },
       }))
 
@@ -162,6 +166,18 @@ const MainArea: React.FC<MainAreaProps> = ({
     setEdges,
     handleOpenIdentityModal,
   ])
+
+  useEffect(() => {
+    setNodes((current) =>
+      current.map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          isModalOpen: !!(activeModal && activeNodeData?.id === node.id),
+        },
+      })),
+    )
+  }, [activeModal, activeNodeData?.id, setNodes])
 
   useEffect(() => {
     const handleVisibilityChange = async () => {
@@ -265,7 +281,7 @@ const MainArea: React.FC<MainAreaProps> = ({
 
     if (!shouldAnimate) return
 
-    if (pattern === "group_communication") return
+    if (isGroupCommunication(pattern)) return
 
     const waitForAnimationAndRun = async () => {
       while (animationLock.current) {
@@ -301,6 +317,7 @@ const MainArea: React.FC<MainAreaProps> = ({
     setAiReplied,
     pattern,
     updateStyle,
+    config.animationSequence,
     setNodes,
     setEdges,
   ])
@@ -309,7 +326,7 @@ const MainArea: React.FC<MainAreaProps> = ({
     (nodeId: string) => {
       if (!nodeId) return
 
-      if (pattern === "group_communication") {
+      if (isGroupCommunication(pattern)) {
         updateStyle(nodeId, HIGHLIGHT.ON)
 
         setTimeout(() => {

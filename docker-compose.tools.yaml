@@ -1,0 +1,12 @@
+services:
+  frontend-tools:
+    image: node:22-alpine
+    profiles: [tools]
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    command: [npm, run, check]
+
+volumes:
+  frontend-node-modules:

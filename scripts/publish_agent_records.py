@@ -9,7 +9,11 @@ This module provides utilities for:
 - Managing agent card records from various agent types
 """
 
+from __future__ import annotations
+
 # Standard library imports
+import argparse
+import os
 import json
 import logging
 import sys
@@ -23,7 +27,12 @@ from google.protobuf.struct_pb2 import Struct
 
 logger = logging.getLogger(__name__)
 
-# Check for required AGNTCY SDK imports
+from a2a.types import AgentCard
+from scripts.travel_agent_cards import get_travel_agent_cards
+
+SDK_IMPORT_ERROR = None
+
+# Optional SDKs are only required for publication, not --dry-run.
 try:
     # AGNTCY SDK imports
     from agntcy.dir_sdk.client import Client, Config
@@ -34,25 +43,16 @@ try:
     from agntcy.oasfsdk.translation.v1.translation_service_pb2_grpc import TranslationServiceStub
     from a2a.types import AgentCard
 except ModuleNotFoundError as e:
-    if "agntcy.dir_sdk" in str(e):
-        logger.error("Missing required AGNTCY DIR SDK dependencies")
-        logger.error("Please install dev dependencies by running:")
-        logger.error("   uv sync --extra dev")
-        logger.error("")
-        logger.error(f"Original error: {e}")
-        sys.exit(1)
-    else:
-        # Re-raise other ModuleNotFoundError exceptions
-        raise
+    SDK_IMPORT_ERROR = e
 
 # Configuration constants
-DEFAULT_OASF_HOST = "localhost"
+DEFAULT_OASF_HOST = os.getenv("OASF_HOST", "localhost")
 DEFAULT_OASF_PORT = 31234
-DEFAULT_ADS_ADDRESS = "localhost:8888"
+DEFAULT_ADS_ADDRESS = os.getenv("DIRECTORY_CLIENT_SERVER_ADDRESS", "localhost:8888")
 DEFAULT_DIRCTL_PATH = "/usr/local/bin/dirctl"
 DEFAULT_SCHEMA_VERSION = "1.0.0"
 DEFAULT_LIST_LIMIT = 10
-OASF_RECORDS_DIR = "oasf_records"
+OASF_RECORDS_DIR = os.getenv("OASF_RECORDS_DIR", "oasf_records")
 
 class OASFUtil:
     """Utility class for translating and validating agent records using OASF SDK.
@@ -401,40 +401,8 @@ def publish_card(card_path: Path, directory: AdsUtil) -> Optional[str]:
         return None
 
 def _import_agent_cards() -> List[AgentCard]:
-    """Import all available agent cards.
-    
-    Returns:
-        List of AgentCard objects
-        
-    Raises:
-        ImportError: If any required agent cards cannot be imported
-    """
-    try:
-        # Farm agent cards
-        from agents.farms.brazil.card import AGENT_CARD as BRAZIL_AGENT_CARD
-        from agents.farms.vietnam.card import AGENT_CARD as VIETNAM_AGENT_CARD
-        from agents.farms.colombia.card import AGENT_CARD as COLOMBIA_AGENT_CARD
-
-        # Logistics agent cards
-        from agents.logistics.accountant.card import AGENT_CARD as ACCOUNTANT_AGENT_CARD
-        from agents.logistics.farm.card import AGENT_CARD as LOGISTICS_FARM_AGENT_CARD
-        from agents.logistics.helpdesk.card import AGENT_CARD as HELPDESK_AGENT_CARD
-        from agents.logistics.shipper.card import AGENT_CARD as SHIPPER_AGENT_CARD
-
-        # TODO: Add supervisor agent cards when available
-
-        return [
-            BRAZIL_AGENT_CARD,
-            VIETNAM_AGENT_CARD,
-            COLOMBIA_AGENT_CARD,
-            ACCOUNTANT_AGENT_CARD,
-            LOGISTICS_FARM_AGENT_CARD,
-            HELPDESK_AGENT_CARD,
-            SHIPPER_AGENT_CARD,
-        ]
-    except ImportError as e:
-        logger.error(f"Failed to import agent cards: {e}")
-        raise
+    """Return only the three A2A agents implemented in this repository."""
+    return get_travel_agent_cards()
 
 
 def _process_agent_card(agent_card: AgentCard, oasf_util: OASFUtil, directory: AdsUtil, cleanup: bool = False) -> Optional[str]:
@@ -481,12 +449,16 @@ def _process_agent_card(agent_card: AgentCard, oasf_util: OASFUtil, directory: A
             Path(card_file).unlink(missing_ok=True)
 
 
-def publish_lungo_agent_records(cid_output_file: Optional[str] = None) -> bool:
-    """Publish all Lungo agent records to the directory.
+def publish_travel_agent_records(cid_output_file: Optional[str] = None) -> bool:
+    """Publish all Travel Agntcy agent records to the directory.
     
     Returns:
         True if all records were published successfully, False otherwise
     """
+    if SDK_IMPORT_ERROR is not None:
+        logger.error("Directory SDKs are missing. Install the locked dev extra: uv sync --locked --extra dev")
+        return False
+    Path(OASF_RECORDS_DIR).mkdir(parents=True, exist_ok=True)
     try:
         directory = AdsUtil()
         oasf_util = OASFUtil()
@@ -520,6 +492,7 @@ def publish_lungo_agent_records(cid_output_file: Optional[str] = None) -> bool:
             logger.info(f"Wrote published CIDs to {cid_output_file}")
         except Exception as e:
             logger.error(f"Failed to write CIDs to file: {e}")
+    oasf_util.close()
     return success_count == total_count
 
 def main(cid_output_file="published_cids.json") -> None:
@@ -529,11 +502,16 @@ def main(cid_output_file="published_cids.json") -> None:
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # clear the previous output file if it exists or create a new one if not
-    Path(cid_output_file).write_text("")
+    parser = argparse.ArgumentParser(description="Publish the three travel A2A agents to a directory.")
+    parser.add_argument("--dry-run", action="store_true", help="Print agent cards without contacting any service")
+    parser.add_argument("--output", default=cid_output_file, help="Output JSON file for published CIDs")
+    args = parser.parse_args()
+    if args.dry_run:
+        print(json.dumps([card.model_dump(mode="json") for card in _import_agent_cards()], indent=2))
+        return
     
-    logger.info("Starting Lungo agent record publishing...")
-    success = publish_lungo_agent_records(cid_output_file=cid_output_file)
+    logger.info("Starting Travel Agntcy agent record publishing...")
+    success = publish_travel_agent_records(cid_output_file=args.output)
     
     if success:
         logger.info("✅ All agent records published successfully")

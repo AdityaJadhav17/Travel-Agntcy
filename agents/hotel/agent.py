@@ -9,6 +9,7 @@ Uses SerpAPI to search for hotels and returns formatted results.
 """
 
 import logging
+import json
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.graph.state import CompiledStateGraph
@@ -80,10 +81,6 @@ class HotelSearchAgent:
                 check_out_date=params["check_out"],
             )
             
-            if not hotels:
-                return {"messages": [AIMessage(
-                    content=f"No hotels found in {params['location']}"
-                )]}
             
             # Format the response
             response = self._format_hotels_response(hotels, params)
@@ -91,7 +88,7 @@ class HotelSearchAgent:
             
         except Exception as e:
             logger.error(f"Error searching hotels: {e}")
-            return {"messages": [AIMessage(content=f"Error searching hotels: {str(e)}")]}
+            return {"messages": [AIMessage(content=json.dumps({"status": "error", "message": str(e)}))]}
     
     def _parse_request(self, message: str) -> dict:
         """

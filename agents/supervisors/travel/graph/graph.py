@@ -203,7 +203,7 @@ Respond with ONLY 'travel_search' or 'general':""",
         )
 
         chain = prompt | self.supervisor_llm
-        response = chain.invoke({"user_message": user_message})
+        response = await chain.ainvoke({"user_message": user_message})
         intent = response.content.strip().lower()
 
         logger.info(f"Supervisor classified intent as: {intent}")
@@ -492,6 +492,7 @@ Respond with ONLY 'travel_search' or 'general':""",
         # Prompt the LLM to extract travel parameters and detect search type
         prompt = f"""Extract travel search parameters from the user's message.
 
+Today's date: {datetime.now().date().isoformat()}
 Current year for reference: {current_year}
 
 User message: {user_message}
@@ -940,7 +941,7 @@ Sorted by rating (best first):
         for i, hotel in enumerate(sorted_hotels[:10], 1):
             name = hotel.get('name', 'Unknown Hotel')
             price_per_night = hotel.get('price', 0) or 0
-            total_price = price_per_night * nights
+            total_price = hotel.get('total_price', price_per_night * nights)
             overall_rating = hotel.get('overall_rating', 0) or hotel.get('rating', 0) or 0
             location_rating = hotel.get('location_rating', 0) or 0
             check_in = hotel.get('check_in_time', '3:00 PM')
@@ -1100,7 +1101,7 @@ Would you like me to also find hotels at {params.destination_city or params.dest
         hotel_price_per_night = hotel.get('price') or 0
         
         # Calculate total hotel cost = per-night rate × number of nights
-        hotel_total_price = hotel_price_per_night * nights
+        hotel_total_price = hotel.get('total_price', hotel_price_per_night * nights)
         
         # Calculate correct total price
         total_price = flight_price + hotel_total_price
@@ -1218,6 +1219,11 @@ Would you like me to search for different dates or another destination?"""
         Returns:
             Updated state with next_node decision (SUPERVISOR to continue, END to finish)
         """
+        # This API handles one user turn per request. A clarification or result
+        # must return to the user before another search can run.
+        if state["messages"] and isinstance(state["messages"][-1], AIMessage):
+            return {"next_node": END}
+
         if not self.reflection_llm:
             class ShouldContinue(BaseModel):
                 should_continue: bool = Field(description="Whether to continue processing")

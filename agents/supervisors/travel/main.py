@@ -22,14 +22,14 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 import uvicorn
 from agntcy_app_sdk.factory import AgntcyFactory
 from ioa_observe.sdk.tracing import session_start
 
 from agents.supervisors.travel.graph.graph import TravelGraph
 from agents.supervisors.travel.graph import shared
-from config.config import DEFAULT_MESSAGE_TRANSPORT
+from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED
 from config.logging_config import setup_logging
 from common.version import get_version_info
 
@@ -42,7 +42,7 @@ load_dotenv()
 
 # Initialize the shared agntcy factory with tracing enabled
 # This enables observability for all agent operations
-shared.set_factory(AgntcyFactory("lungo.travel_supervisor", enable_tracing=True))
+shared.set_factory(AgntcyFactory("lungo.travel_supervisor", enable_tracing=TRACING_ENABLED))
 
 # Create FastAPI application
 app = FastAPI(
@@ -67,6 +67,13 @@ travel_graph = TravelGraph()
 class PromptRequest(BaseModel):
     """Request model for travel planning prompts."""
     prompt: str
+
+    @field_validator("prompt")
+    @classmethod
+    def validate_prompt(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Prompt must be a non-empty string")
+        return value.strip()
 
 
 @app.get("/.well-known/agent.json")
@@ -164,33 +171,20 @@ async def handle_stream_prompt(request: PromptRequest):
         {"response": "Found 15 flights...", "session_id": "..."}
         {"response": "Best deal: $1,234 total...", "session_id": "..."}
     """
-    try:
+    async def stream_generator():
+        # Keep the tracing context alive for the entire asynchronous iteration.
         with session_start() as session_id:
-            
-            async def stream_generator():
-                """Generate streaming responses from the travel graph."""
-                try:
-                    async for chunk in travel_graph.streaming_serve(request.prompt):
-                        yield json.dumps({
-                            "response": chunk,
-                            "session_id": session_id["executionID"]
-                        }) + "\n"
-                except Exception as e:
-                    logger.error(f"Error in stream: {e}")
-                    yield json.dumps({"response": f"Error: {str(e)}"}) + "\n"
+            try:
+                async for chunk in travel_graph.streaming_serve(request.prompt):
+                    yield json.dumps({"response": chunk, "session_id": session_id["executionID"]}) + "\n"
+            except Exception:
+                logger.error("Travel stream failed")
+                yield json.dumps({"response": "Travel search failed. Check provider credentials and service logs.", "session_id": session_id["executionID"]}) + "\n"
 
-            return StreamingResponse(
-                stream_generator(),
-                media_type="application/x-ndjson",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                }
-            )
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Operation failed: {str(e)}")
+    return StreamingResponse(
+        stream_generator(), media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/health")

@@ -14,6 +14,7 @@ interface LogisticsStreamStep {
 
 interface AuctionStreamingResponse {
   response: string
+  session_id?: string
 }
 
 interface GroupCommunicationFeedProps {

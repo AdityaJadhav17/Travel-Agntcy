@@ -28,12 +28,13 @@ from config.config import (
     DEFAULT_MESSAGE_TRANSPORT,
     TRANSPORT_SERVER_ENDPOINT,
     ENABLE_HTTP,
+    TRACING_ENABLED,
 )
 
 load_dotenv()
 
 # Initialize factory with tracing (same pattern as original)
-factory = AgntcyFactory("lungo.hotel_agent", enable_tracing=True)
+factory = AgntcyFactory("lungo.hotel_agent", enable_tracing=TRACING_ENABLED)
 
 
 async def run_http_server(server):
@@ -43,12 +44,13 @@ async def run_http_server(server):
         config = Config(app=server.build(), host="0.0.0.0", port=port, loop="asyncio")
         userver = Server(config)
         await userver.serve()
-    except Exception as e:
-        print(f"HTTP server encountered an error: {e}")
+    except Exception:
+        raise
 
 
 async def run_transport(server, transport_type, endpoint):
     """Run the transport and message bridge."""
+    app_session = None
     try:
         personal_topic = A2AProtocol.create_agent_topic(AGENT_CARD)
         transport = factory.create_transport(
@@ -71,7 +73,9 @@ async def run_transport(server, transport_type, endpoint):
 
     except Exception as e:
         print(f"Transport encountered an error: {e}")
-        await app_session.stop_all_sessions()
+        if app_session is not None:
+            await app_session.stop_all_sessions()
+        raise
 
 
 async def main(enable_http: bool):
@@ -105,4 +109,4 @@ if __name__ == '__main__':
     except KeyboardInterrupt:
         print("\nShutting down gracefully on keyboard interrupt.")
     except Exception as e:
-        print(f"Error occurred: {e}")
+        raise

@@ -1,1 +1,14 @@
 .env
+.env.*
+!.env.example
+**/node_modules/
+.venv/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.pytest-logs/
+*.log
+frontend/dist/
+.runtime/
+published_cids.json
+oasf_records/*_Search_Agent.json

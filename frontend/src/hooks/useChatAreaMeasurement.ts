@@ -4,6 +4,7 @@
  **/
 
 import { useEffect, useRef, useState, useCallback } from "react"
+import type React from "react"
 
 interface UseChatAreaMeasurementOptions {
   debounceMs?: number

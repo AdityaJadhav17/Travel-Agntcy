@@ -1,9 +1,9 @@
 /**
  * Copyright AGNTCY Contributors (https://github.com/agntcy)
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Travel Planning Agent Frontend Application
- * 
+ *
  * This is the main React application that provides a UI for interacting with
  * the Travel Planning Agent. It supports searching for flights and hotels.
  **/
@@ -34,7 +34,7 @@ export interface ChatHistoryItem {
   title: string
   timestamp: Date
   messages: Array<{
-    role: 'user' | 'assistant'
+    role: "user" | "assistant"
     content: string
   }>
 }
@@ -51,16 +51,20 @@ const App: React.FC = () => {
   const [aiReplied, setAiReplied] = useState<boolean>(false)
   const [buttonClicked, setButtonClicked] = useState<boolean>(false)
   const [currentUserMessage, setCurrentUserMessage] = useState<string>("")
-  const [agentResponse, setAgentResponse] = useState<ApiResponse | undefined>(undefined)
+  const [agentResponse, setAgentResponse] = useState<ApiResponse | undefined>(
+    undefined,
+  )
   const [isAgentLoading, setIsAgentLoading] = useState<boolean>(false)
   const [apiError, setApiError] = useState<boolean>(false)
   const [showFinalResponse, setShowFinalResponse] = useState<boolean>(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true)
-  
+
   // Chat history state
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([])
-  const [conversationMessages, setConversationMessages] = useState<Array<{role: 'user' | 'assistant', content: string}>>([])
+  const [conversationMessages, setConversationMessages] = useState<
+    Array<{ role: "user" | "assistant"; content: string }>
+  >([])
 
   // Ref for scrolling to bottom
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -79,10 +83,12 @@ const App: React.FC = () => {
     if (savedHistory) {
       try {
         const parsed = JSON.parse(savedHistory)
-        setChatHistory(parsed.map((h: any) => ({
-          ...h,
-          timestamp: new Date(h.timestamp)
-        })))
+        setChatHistory(
+          parsed.map((h: any) => ({
+            ...h,
+            timestamp: new Date(h.timestamp),
+          })),
+        )
       } catch (e) {
         console.error("Error loading chat history:", e)
       }
@@ -96,19 +102,16 @@ const App: React.FC = () => {
     }
   }, [chatHistory])
 
-  const handlePatternChange = useCallback(
-    (pattern: PatternType) => {
-      setShowFinalResponse(false)
-      setAgentResponse(undefined)
-      setIsAgentLoading(false)
-      setApiError(false)
-      setCurrentUserMessage("")
-      setButtonClicked(false)
-      setAiReplied(false)
-      setSelectedPattern(pattern)
-    },
-    [],
-  )
+  const handlePatternChange = useCallback((pattern: PatternType) => {
+    setShowFinalResponse(false)
+    setAgentResponse(undefined)
+    setIsAgentLoading(false)
+    setApiError(false)
+    setCurrentUserMessage("")
+    setButtonClicked(false)
+    setAiReplied(false)
+    setSelectedPattern(pattern)
+  }, [])
 
   const [messages, setMessages] = useState<Message[]>(() => {
     const saved = localStorage.getItem(LOCAL_STORAGE_KEY)
@@ -142,7 +145,7 @@ const App: React.FC = () => {
     setApiError(false)
     setShowFinalResponse(true)
 
-    const userMessage = { role: 'user' as const, content: query }
+    const userMessage = { role: "user" as const, content: query }
     const newMessages = [...conversationMessages, userMessage]
     setConversationMessages(newMessages)
 
@@ -157,7 +160,12 @@ const App: React.FC = () => {
   }
 
   const handleApiResponse = useCallback(
-    (response: ApiResponse | string, isError: boolean = false, userQuery?: string, currentMessages?: Array<{role: 'user' | 'assistant', content: string}>) => {
+    (
+      response: ApiResponse | string,
+      isError: boolean = false,
+      userQuery?: string,
+      currentMessages?: Array<{ role: "user" | "assistant"; content: string }>,
+    ) => {
       let apiResp: ApiResponse
       if (typeof response === "string") {
         apiResp = { response }
@@ -169,7 +177,10 @@ const App: React.FC = () => {
       setAiReplied(true)
       setApiError(isError)
 
-      const assistantMessage = { role: 'assistant' as const, content: apiResp.response }
+      const assistantMessage = {
+        role: "assistant" as const,
+        content: apiResp.response,
+      }
       const messagesToUse = currentMessages || conversationMessages
       const updatedMessages = [...messagesToUse, assistantMessage]
       setConversationMessages(updatedMessages)
@@ -177,24 +188,27 @@ const App: React.FC = () => {
       const queryToUse = userQuery || currentUserMessage
       if (queryToUse) {
         if (currentChatId) {
-          setChatHistory(prev => prev.map(chat => 
-            chat.id === currentChatId 
-              ? { ...chat, messages: updatedMessages, timestamp: new Date() }
-              : chat
-          ))
+          setChatHistory((prev) =>
+            prev.map((chat) =>
+              chat.id === currentChatId
+                ? { ...chat, messages: updatedMessages, timestamp: new Date() }
+                : chat,
+            ),
+          )
         } else {
-          const title = queryToUse.length > 35 
-            ? queryToUse.substring(0, 35) + "..." 
-            : queryToUse
-          
+          const title =
+            queryToUse.length > 35
+              ? queryToUse.substring(0, 35) + "..."
+              : queryToUse
+
           const newChat: ChatHistoryItem = {
             id: `chat_${Date.now()}`,
             title: title,
             timestamp: new Date(),
-            messages: updatedMessages
+            messages: updatedMessages,
           }
-          
-          setChatHistory(prev => [newChat, ...prev].slice(0, 15))
+
+          setChatHistory((prev) => [newChat, ...prev].slice(0, 15))
           setCurrentChatId(newChat.id)
         }
       }
@@ -244,14 +258,18 @@ const App: React.FC = () => {
   }
 
   const handleSelectChat = (chatId: string) => {
-    const selectedChat = chatHistory.find(chat => chat.id === chatId)
+    const selectedChat = chatHistory.find((chat) => chat.id === chatId)
     if (selectedChat && selectedChat.messages.length > 0) {
       setCurrentChatId(chatId)
       setConversationMessages(selectedChat.messages)
-      
-      const lastUserMsg = [...selectedChat.messages].reverse().find(m => m.role === 'user')
-      const lastAssistantMsg = [...selectedChat.messages].reverse().find(m => m.role === 'assistant')
-      
+
+      const lastUserMsg = [...selectedChat.messages]
+        .reverse()
+        .find((m) => m.role === "user")
+      const lastAssistantMsg = [...selectedChat.messages]
+        .reverse()
+        .find((m) => m.role === "assistant")
+
       if (lastUserMsg) {
         setCurrentUserMessage(lastUserMsg.content)
       }
@@ -265,7 +283,7 @@ const App: React.FC = () => {
   }
 
   const handleDeleteChat = (chatId: string) => {
-    setChatHistory(prev => prev.filter(chat => chat.id !== chatId))
+    setChatHistory((prev) => prev.filter((chat) => chat.id !== chatId))
     if (currentChatId === chatId) {
       handleClearConversation()
     }
@@ -281,7 +299,10 @@ const App: React.FC = () => {
   return (
     <ThemeProvider>
       <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#212121]">
-        <Navigation onToggleSidebar={handleToggleSidebar} isSidebarOpen={isSidebarOpen} />
+        <Navigation
+          onToggleSidebar={handleToggleSidebar}
+          isSidebarOpen={isSidebarOpen}
+        />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar
             selectedPattern={selectedPattern}
@@ -293,14 +314,16 @@ const App: React.FC = () => {
             currentChatId={currentChatId}
             isOpen={isSidebarOpen}
           />
-          <div className={`flex flex-1 flex-col bg-[#212121] ${isSidebarOpen ? 'border-l border-gray-800' : ''}`}>
+          <div
+            className={`flex flex-1 flex-col bg-[#212121] ${isSidebarOpen ? "border-l border-gray-800" : ""}`}
+          >
             {/* Main content area - scrollable */}
             <div className="relative flex-1 overflow-y-auto">
               {/* New Chat Welcome View - Graph + Welcome Section */}
               {showWelcome && (
                 <div className="flex h-full flex-col">
                   {/* Agent Graph - takes up available space above welcome */}
-                  <div className="flex-1 min-h-[300px]">
+                  <div className="min-h-[300px] flex-1">
                     <MainArea
                       pattern={selectedPattern}
                       buttonClicked={buttonClicked}
@@ -313,25 +336,29 @@ const App: React.FC = () => {
                       onNodeHighlight={() => {}}
                     />
                   </div>
-                  
+
                   {/* Welcome Section */}
                   <div className="flex flex-col items-center justify-center px-4 pb-4">
                     {/* Airplane Icon - same orientation as logo */}
                     <div className="mb-4">
-                      <Plane className="h-12 w-12 text-[#3ce98a]" strokeWidth={2} />
+                      <Plane
+                        className="h-12 w-12 text-[#3ce98a]"
+                        strokeWidth={2}
+                      />
                     </div>
-                    
+
                     {/* Welcome Text */}
                     <h1 className="mb-2 text-2xl font-semibold text-white">
                       How can I help you plan your trip?
                     </h1>
                     <p className="text-gray-400">
-                      Find flights, hotels, and activities for your next adventure
+                      Find flights, hotels, and activities for your next
+                      adventure
                     </p>
                   </div>
                 </div>
               )}
-              
+
               {/* Loading State with Graph - when messages exist but loading */}
               {!showWelcome && isAgentLoading && (
                 <div className="h-[350px]">
@@ -354,7 +381,7 @@ const App: React.FC = () => {
                 <div className="mx-auto w-full max-w-[768px] px-4 py-6">
                   {conversationMessages.map((msg, index) => (
                     <div key={index} className="mb-6">
-                      {msg.role === 'user' ? (
+                      {msg.role === "user" ? (
                         /* User Message - right aligned bubble */
                         <div className="flex justify-end">
                           <div className="max-w-[85%] rounded-3xl bg-[#2f2f2f] px-5 py-3 text-[15px] text-gray-100">
@@ -364,7 +391,13 @@ const App: React.FC = () => {
                       ) : (
                         /* Assistant Message - left aligned with avatar */
                         <div className="flex items-start gap-4">
-                          <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full" style={{background: 'linear-gradient(135deg, #3ce98a, #5feb9b)'}}>
+                          <div
+                            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full"
+                            style={{
+                              background:
+                                "linear-gradient(135deg, #3ce98a, #5feb9b)",
+                            }}
+                          >
                             <Plane className="h-4 w-4 text-white" />
                           </div>
                           <div className="flex-1 pt-1 text-[15px]">
@@ -378,7 +411,13 @@ const App: React.FC = () => {
                   {/* Loading indicator */}
                   {isAgentLoading && (
                     <div className="mb-6 flex items-start gap-4">
-                      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full" style={{background: 'linear-gradient(135deg, #3ce98a, #5feb9b)'}}>
+                      <div
+                        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full"
+                        style={{
+                          background:
+                            "linear-gradient(135deg, #3ce98a, #5feb9b)",
+                        }}
+                      >
                         <Plane className="h-4 w-4 text-white" />
                       </div>
                       <div className="flex items-center gap-1 pt-3">
@@ -393,7 +432,7 @@ const App: React.FC = () => {
                 </div>
               )}
             </div>
-            
+
             {/* Input area - fixed at bottom */}
             <div className="flex w-full flex-none flex-col items-center justify-end gap-0 bg-[#212121] px-4 pb-6 pt-2">
               <ChatArea

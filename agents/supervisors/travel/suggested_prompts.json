@@ -1,13 +1,13 @@
 {
   "travel": [
-    "Find me the cheapest flight and hotel from LAX to Tokyo, January 15-22, 2026",
-    "I need a trip from NYC to Paris, February 1-10, 2026",
-    "Search for flights from San Francisco to London, March 5-12, 2026",
+    "Find me the cheapest flight and hotel from LAX to Tokyo, next month for three nights",
+    "I need a trip from NYC to Paris, next month for three nights",
+    "Search for flights from San Francisco to London, next month for three nights",
     "What's the best deal for a trip from Chicago to Rome next month?",
-    "Find travel options from Miami to Cancun, April 1-7, 2026"
+    "Find travel options from Miami to Cancun, next month for three nights"
   ],
   "streaming_prompts": [
-    "Find me the cheapest flight and hotel from LAX to Tokyo, January 15-22, 2026",
-    "Search for the best travel deals from New York to Barcelona, May 10-20, 2026"
+    "Find me the cheapest flight and hotel from LAX to Tokyo, next month for three nights",
+    "Search for the best travel deals from New York to Barcelona, next month for three nights"
   ]
 }

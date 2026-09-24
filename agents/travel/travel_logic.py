@@ -413,7 +413,7 @@ def find_cheapest_plan(
         # STEP 4: Find cheapest valid hotel for this flight
         for hotel in valid_hotels:
             flight_price = flight.get("price") or 0
-            hotel_price = hotel.get("price") or 0
+            hotel_price = hotel.get("total_price", hotel.get("price")) or 0
             total_price = flight_price + hotel_price
             
             if total_price < best_total_price:

@@ -1,71 +1,40 @@
-# Agent Directory Integration Guide
+# Travel agent directory integration
 
-This guide demonstrates how to integrate **coffeeAgntcy lungo** with **[agntcy dir](https://github.com/agntcy/dir)** for automated agent discovery and management.
+The optional publishing tool uses the current Flight Search Agent, Hotel Search
+Agent, and Activity Search Agent A2A cards. The supervisor exposes a custom REST
+API, so it is not advertised as an A2A server. Existing coffee records under
+`oasf_records` are historical examples and are not selected for publication.
 
-## Overview
+## Preview without publishing
 
-The integration enables automatic translation and publication of all lungo agent A2A cards to a local agntcy directory service. 
+After rebuilding the core images:
 
-## Quick Start
-
-### 1. Start the Directory Service
-
-First, launch the agntcy directory API server, directory MCP server and registry:
-
-```bash
-docker-compose up -d dir-api-server dir-mcp-server zot
+```sh
+docker compose exec -T travel-supervisor uv run --no-sync python -m scripts.publish_agent_records --dry-run
 ```
 
-This starts:
-- `dir-api-server`: The directory API service for agent record management
-- `dir-mcp-server`: The MCP server in front of the API service
-- `zot`: OCI-compliant registry for storing agent artifacts
+This prints the three cards and needs no directory SDK extras, credentials or
+network calls. The URLs use Docker service names and are reachable by clients on
+the Compose network; adapt the card URLs before publishing for external clients.
 
-### 2. Install Development Dependencies
+## Optional local publication
 
-Install the required development dependencies for the integration scripts:
+From Bash/WSL, run `bash scripts/publish_agent_records.sh`. It starts only the local
+directory registry/API and OASF translator, waits for configured health checks,
+and runs the publisher in a disposable supervisor container with the locked dev
+extra installed. That extra is large and also contains unrelated upstream test
+packages. It leaves services running and writes generated records and CIDs under
+`.runtime/directory/`. `--dry-run` avoids starting the optional services.
 
-```bash
-uv sync --extra dev
+Direct Python usage is `uv run --locked --extra dev python -m
+scripts.publish_agent_records`. Optional overrides are `OASF_HOST`,
+`DIRECTORY_CLIENT_SERVER_ADDRESS`, `OASF_RECORDS_DIR`, and `--output`.
+Stop only these optional services when finished:
+
+```sh
+docker compose --profile directory --profile oasf-translate stop dir-api-server zot oasf-translation-service
 ```
 
-### 3. Publish Agent Records
-
-Run the automated agent record publication script:
-
-```bash
-./scripts/publish_agent_records.sh
-```
-
-This script will:
-- Scan the `agents/` directory for A2A card definitions
-- Convert agent metadata to OASF format
-- Upload records to the running directory service
-- Generate content identifiers (CIDs) for published records
-
-### 4. Verify and Interact with Records
-
-After publishing, you can:
-
-1. **View published records**: Check the generated `published_cids.json` file for CIDs of your published agents
-2. **Interact with directory**: Use the `dirctl` CLI tool to query and manage directory records
-
-
-```
-{
-  "Brazil Coffee Farm": "baeareiem5tc4gmtdhg74g5fmehlda4uvikfinlfpkmndj5jmv2zzojeume",
-  "Vietnam Coffee Farm": "baeareiahesjf46pm7uvd7pupj66s6zppxot3arffaeshjhramjrinn3pi4",
-  "Colombia Coffee Farm": "baeareib74t6ozgzo3j3mlkertldtxn45d4rj5pyfridujs3ycmgnvaphai",
-  "Accountant agent": "baeareighwgck5fbup3d5czp2bkskqeu4veot6r3uyq53q6xsji4fw3n3oi",
-  "Tatooine Farm agent": "baeareienn42cucclv7eus36vxblixskdvrc74zuw5t4iaptp4g357lzayu",
-  "Logistics Helpdesk": "baeareibjql2cv3kmygsn2ofor3myoc3ar44m7lszo36ae5jp6aonlky2zq",
-  "Shipping agent": "baeareifej6zgoe6o2mnlycgwwapdjit7dyaydnsayx5y3wbplbcmovr7w4"
-}
-```
-
-```bash
-# Example: Pull an agent record from cid
-dirctl pull baeareiem5tc4gmtdhg74g5fmehlda4uvikfinlfpkmndj5jmv2zzojeume
-```
-
-For detailed `dirctl` usage, see the [CLI documentation](https://github.com/agntcy/dir/tree/main/cli).
+The dry-run path is verified. Live translation/publication is not: the optional
+registry services were previously unhealthy on this machine. Their recovery and
+external directory publication remain separate from the working core app.

@@ -1,3 +1,14 @@
+# Current travel tests
+
+Run `uv run pytest tests/travel -q` or the Docker test command in the root README.
+`pytest.ini` defaults to this credential-free travel suite. Live checks use
+`scripts/smoke_test.py` and consume provider quota.
+
+The documentation below describes the retained upstream coffee/logistics suite,
+whose agents are no longer present in this repository.
+
+---
+
 # Lungo Test Suite
 
 ## Scope

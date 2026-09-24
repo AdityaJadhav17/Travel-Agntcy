@@ -1,19 +1,12 @@
-## Prerequisites
+# Travel Agntcy frontend
 
-- Ensure your **Node.js** version is **16.14.0** or higher. Check your version with:
-  ```sh
-  node -v
-  ```
-- If Node.js is not installed, download and install it from the [official website](https://nodejs.org/).
+React 19, TypeScript, Vite 6. Use Node.js 22 and npm.
 
-## Quick Start
-
-1. Install the necessary dependencies:
-   ```sh
-   npm install
-   ```
-
-2. Start the development server:
-   ```sh
-   npm run dev
-   ```
+From this directory: `npm ci`, then `npm run dev` (http://localhost:3000).
+Checks: `npm run check` (lint with zero warnings, format, types, build).
+Use `npm run format` and `npm run lint` to fix style findings.
+Do not commit node_modules or dist; install with `npm ci`.
+For Docker-only checks, use the frontend-tools commands in the root README.
+Copy `.env.example` to `.env` only if you need to override the local API URL.
+The UI sends POST /agent/prompt to VITE_EXCHANGE_APP_API_URL (default port 8000).
+See the root README for the recommended Docker setup and backend requirements.

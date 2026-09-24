@@ -19,6 +19,8 @@ def get_llm(streaming: bool = True):
     Args:
       streaming: Enable streaming mode. Set to False when using with_structured_output()
   """
+  if not LLM_MODEL:
+    raise ValueError("ACTION REQUIRED: add LLM_MODEL")
   litellm_proxy_base_url = os.getenv("LITELLM_PROXY_BASE_URL")
   litellm_proxy_api_key = os.getenv("LITELLM_PROXY_API_KEY")
 
@@ -31,7 +33,7 @@ def get_llm(streaming: bool = True):
       streaming=streaming
     )
   else:
-    llm = ChatLiteLLM(model=LLM_MODEL)
+    llm = ChatLiteLLM(model=LLM_MODEL, streaming=streaming)
 
 
   if LLM_MODEL.startswith("oauth2/"):

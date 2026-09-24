@@ -1,9 +1,9 @@
 /**
  * Copyright AGNTCY Contributors (https://github.com/agntcy)
  * SPDX-License-Identifier: Apache-2.0
- * 
+ *
  * Graph Configurations for Travel Agent
- * 
+ *
  * This module defines the visual graph configuration for the Travel Planning Agent.
  * The travel agent has a simplified architecture compared to the original coffee demo:
  * - Single supervisor node (Travel Agent)
@@ -35,7 +35,7 @@ export interface GraphConfig {
 
 /**
  * Travel Search Configuration with A2A Communication
- * 
+ *
  * Architecture:
  * - Travel Supervisor: Main agent that coordinates the search (A2A Client)
  * - NATS Transport: A2A message transport layer
@@ -47,7 +47,7 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
   nodes: [
     // Travel Supervisor Node - Main agent
     {
-      id: NODE_IDS.AUCTION_AGENT,  // Reusing ID for compatibility
+      id: NODE_IDS.AUCTION_AGENT, // Reusing ID for compatibility
       type: NODE_TYPES.CUSTOM,
       data: {
         icon: (
@@ -81,7 +81,7 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
     },
     // Flight Search Agent Node - A2A Server
     {
-      id: NODE_IDS.BRAZIL_FARM,  // Reusing ID for compatibility
+      id: NODE_IDS.BRAZIL_FARM, // Reusing ID for compatibility
       type: NODE_TYPES.CUSTOM,
       data: {
         icon: <Plane className="dark-icon h-4 w-4" />,
@@ -93,11 +93,11 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
         githubLink: `${urlsConfig.github.baseUrl}/agents/flight`,
         agentDirectoryLink: urlsConfig.agentDirectory.baseUrl,
       },
-      position: { x: 250, y: 480 },  // Left position for 3-agent layout
+      position: { x: 250, y: 480 }, // Left position for 3-agent layout
     },
     // Hotel Search Agent Node - A2A Server
     {
-      id: NODE_IDS.COLOMBIA_FARM,  // Reusing ID for compatibility
+      id: NODE_IDS.COLOMBIA_FARM, // Reusing ID for compatibility
       type: NODE_TYPES.CUSTOM,
       data: {
         icon: <Hotel className="dark-icon h-4 w-4" />,
@@ -113,7 +113,7 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
     },
     // Activity Search Agent Node - A2A Server
     {
-      id: NODE_IDS.VIETNAM_FARM,  // Reusing ID for compatibility
+      id: NODE_IDS.VIETNAM_FARM, // Reusing ID for compatibility
       type: NODE_TYPES.CUSTOM,
       data: {
         icon: <MapPin className="dark-icon h-4 w-4" />,
@@ -144,7 +144,7 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
       source: NODE_IDS.TRANSPORT,
       target: NODE_IDS.BRAZIL_FARM,
       sourceHandle: "bottom_left",
-      data: { label: EDGE_LABELS.A2A },  // A2A protocol over NATS
+      data: { label: EDGE_LABELS.A2A }, // A2A protocol over NATS
       type: EDGE_TYPES.CUSTOM,
     },
     // Transport to Hotel Agent (A2A) - uses bottom_center handle for middle position
@@ -153,7 +153,7 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
       source: NODE_IDS.TRANSPORT,
       target: NODE_IDS.COLOMBIA_FARM,
       sourceHandle: "bottom_center",
-      data: { label: EDGE_LABELS.A2A },  // A2A protocol over NATS
+      data: { label: EDGE_LABELS.A2A }, // A2A protocol over NATS
       type: EDGE_TYPES.CUSTOM,
     },
     // Transport to Activity Agent (A2A)
@@ -162,7 +162,7 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
       source: NODE_IDS.TRANSPORT,
       target: NODE_IDS.VIETNAM_FARM,
       sourceHandle: "bottom_right",
-      data: { label: EDGE_LABELS.A2A },  // A2A protocol over NATS
+      data: { label: EDGE_LABELS.A2A }, // A2A protocol over NATS
       type: EDGE_TYPES.CUSTOM,
     },
   ],
@@ -190,7 +190,7 @@ const TRAVEL_SEARCH_CONFIG: GraphConfig = {
 
 /**
  * Get the graph configuration for a given pattern
- * 
+ *
  * Travel agent patterns:
  * - travel_search: Standard travel search
  * - travel_search_streaming: Streaming travel search with real-time updates
@@ -235,7 +235,7 @@ export const getGraphConfig = (
 
 /**
  * Update transport labels in the graph based on current configuration
- * 
+ *
  * Fetches the transport type (NATS/SLIM) from the travel supervisor
  * and updates the graph nodes and edges accordingly.
  */

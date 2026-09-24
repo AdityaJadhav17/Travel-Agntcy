@@ -34,8 +34,9 @@ services:
     env_file:
       - .env
     environment:
+      - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
-      - TRANSPORT_SERVER_ENDPOINT=${TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
+      - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
       - OTLP_HTTP_ENDPOINT=${OTLP_HTTP_ENDPOINT:-http://otel-collector:4318}
       - SERPAPI_API_KEY=${SERPAPI_API_KEY}
       - FLIGHT_AGENT_HOST=0.0.0.0
@@ -43,8 +44,15 @@ services:
       - ENABLE_HTTP=true
     ports:
       - "9001:9001"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/.well-known/agent.json')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
-      - nats
+      nats:
+        condition: service_healthy
 
   # =============================================================================
   # Hotel Search Agent (A2A Server)
@@ -59,8 +67,9 @@ services:
     env_file:
       - .env
     environment:
+      - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
-      - TRANSPORT_SERVER_ENDPOINT=${TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
+      - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
       - OTLP_HTTP_ENDPOINT=${OTLP_HTTP_ENDPOINT:-http://otel-collector:4318}
       - SERPAPI_API_KEY=${SERPAPI_API_KEY}
       - HOTEL_AGENT_HOST=0.0.0.0
@@ -68,8 +77,15 @@ services:
       - ENABLE_HTTP=true
     ports:
       - "9002:9002"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9002/.well-known/agent.json')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
-      - nats
+      nats:
+        condition: service_healthy
 
   # =============================================================================
   # Activity Search Agent (A2A Server)
@@ -84,8 +100,9 @@ services:
     env_file:
       - .env
     environment:
+      - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
-      - TRANSPORT_SERVER_ENDPOINT=${TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
+      - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
       - OTLP_HTTP_ENDPOINT=${OTLP_HTTP_ENDPOINT:-http://otel-collector:4318}
       - SERPAPI_API_KEY=${SERPAPI_API_KEY}
       - ACTIVITY_AGENT_HOST=0.0.0.0
@@ -93,8 +110,15 @@ services:
       - ENABLE_HTTP=true
     ports:
       - "9003:9003"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9003/.well-known/agent.json')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
-      - nats
+      nats:
+        condition: service_healthy
 
   # =============================================================================
   # Travel Supervisor Agent (A2A Client)
@@ -110,8 +134,9 @@ services:
       - .env
     environment:
       # Transport settings (NATS for A2A communication)
+      - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
-      - TRANSPORT_SERVER_ENDPOINT=${TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
+      - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
       # Observability
       - OTLP_HTTP_ENDPOINT=${OTLP_HTTP_ENDPOINT:-http://otel-collector:4318}
       # Identity auth (disabled by default)
@@ -122,18 +147,34 @@ services:
       - TRAVEL_HOTEL_CHECKIN_GAP_HOURS=${TRAVEL_HOTEL_CHECKIN_GAP_HOURS:-2}
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
-      - nats
-      - flight-agent
-      - hotel-agent
-      - activity-agent
+      nats:
+        condition: service_healthy
+      flight-agent:
+        condition: service_healthy
+      hotel-agent:
+        condition: service_healthy
+      activity-agent:
+        condition: service_healthy
 
   # =============================================================================
   # Message Transport
   # =============================================================================
   # NATS server for agent communication
   nats:
-    image: nats:latest
+    image: nats:2.11-alpine
+    command: ["--http_port", "8222"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
     container_name: lungo-nats
     ports:
       - "4222:4222"
@@ -143,6 +184,7 @@ services:
 
   # SLIM transport (alternative to NATS, required for group conversations)
   slim:
+    profiles: ["slim"]
     image: ghcr.io/agntcy/slim:0.6.1
     container_name: lungo-slim
     ports:
@@ -162,22 +204,28 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.ui
+      args:
+        VITE_EXCHANGE_APP_API_URL: ${VITE_EXCHANGE_APP_API_URL:-http://127.0.0.1:8000}
+        VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-http://127.0.0.1:3001}
     image: lungo-ui:latest
     container_name: lungo-ui
-    environment:
-      # Travel supervisor API URL
-      - VITE_EXCHANGE_APP_API_URL=http://127.0.0.1:8000
-      - VITE_GRAFANA_URL=http://127.0.0.1:3001
     depends_on:
-      - travel-supervisor
+      travel-supervisor:
+        condition: service_healthy
     ports:
       - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
 
   # =============================================================================
   # Observability Stack
   # =============================================================================
   # ClickHouse for storing traces and metrics
   clickhouse-server:
+    profiles: ["observability"]
     image: clickhouse/clickhouse-server
     container_name: lungo-clickhouse-server
     ports:
@@ -207,6 +255,7 @@ services:
 
   # OpenTelemetry collector for trace aggregation
   otel-collector:
+    profiles: ["observability"]
     image: otel/opentelemetry-collector-contrib:latest
     container_name: lungo-otel-collector
     restart: unless-stopped
@@ -222,6 +271,7 @@ services:
 
   # Grafana for visualization and dashboards
   grafana:
+    profiles: ["observability"]
     image: grafana/grafana
     container_name: grafana-lungo
     ports:
@@ -245,6 +295,7 @@ services:
   # =============================================================================
   # MCE API layer for observability data
   mce-api-layer:
+    profiles: ["analytics"]
     image: ghcr.io/agntcy/obs-api:0.1.1
     container_name: lungo-mce-api-layer
     ports:
@@ -271,15 +322,16 @@ services:
 
   # Metrics Computation Engine for advanced analytics
   metrics-computation-engine:
+    profiles: ["analytics"]
     image: ghcr.io/agntcy/mce:1.2.1
     container_name: lungo-metrics-computation-engine
     ports:
       - "8001:8000"
     environment:
       - API_BASE_URL=http://mce-api-layer:8080
-      - LLM_BASE_MODEL_URL=${AZURE_API_BASE:-${OPENAI_ENDPOINT}}
-      - LLM_MODEL_NAME=${AZURE_API_VERSION:-${OPENAI_MODEL_NAME}}
-      - LLM_API_KEY=${AZURE_API_KEY:-${OPENAI_API_KEY}}
+      - LLM_BASE_MODEL_URL=${AZURE_API_BASE:-${OPENAI_ENDPOINT:-}}
+      - LLM_MODEL_NAME=${AZURE_API_VERSION:-${OPENAI_MODEL_NAME:-}}
+      - LLM_API_KEY=${AZURE_API_KEY:-${OPENAI_API_KEY:-}}
     depends_on:
       mce-api-layer:
         condition: service_healthy
@@ -289,6 +341,7 @@ services:
   # =============================================================================
   # Directory API server for agent registry
   dir-api-server:
+    profiles: ["directory"]
     image: ghcr.io/agntcy/dir-apiserver:v0.6.0
     container_name: dir-api-server
     env_file:
@@ -311,6 +364,7 @@ services:
 
   # Directory MCP server
   dir-mcp-server:
+    profiles: ["directory"]
     image: ghcr.io/agntcy/dir-ctl:latest
     container_name: dir-mcp-server
     stdin_open: true
@@ -327,6 +381,7 @@ services:
 
   # Zot OCI registry for agent artifacts
   zot:
+    profiles: ["directory"]
     image: ghcr.io/project-zot/zot:v2.1.10
     container_name: zot
     ports:

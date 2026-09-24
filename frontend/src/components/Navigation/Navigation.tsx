@@ -14,7 +14,10 @@ interface NavigationProps {
   isSidebarOpen?: boolean
 }
 
-const Navigation: React.FC<NavigationProps> = ({ onToggleSidebar, isSidebarOpen = true }) => {
+const Navigation: React.FC<NavigationProps> = ({
+  onToggleSidebar,
+  isSidebarOpen = true,
+}) => {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const { isLightMode, toggleTheme } = useTheme()
 
@@ -32,7 +35,13 @@ const Navigation: React.FC<NavigationProps> = ({ onToggleSidebar, isSidebarOpen 
 
   return (
     <div className="order-0 box-border flex h-[56px] w-full flex-none flex-grow-0 flex-col items-start self-stretch p-0">
-      <div className="order-0 box-border flex h-[56px] w-full flex-none flex-grow-0 flex-row items-center justify-between gap-2 self-stretch border-b border-emerald-400/30 px-2 py-[10px] shadow-lg sm:px-4" style={{backgroundImage: 'linear-gradient(to right, #3ce98a, #5feb9b, #7becac, #94edbb, #abedc9)'}}>
+      <div
+        className="order-0 box-border flex h-[56px] w-full flex-none flex-grow-0 flex-row items-center justify-between gap-2 self-stretch border-b border-emerald-400/30 px-2 py-[10px] shadow-lg sm:px-4"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, #3ce98a, #5feb9b, #7becac, #94edbb, #abedc9)",
+        }}
+      >
         {/* Left - Sidebar toggle */}
         <div className="flex w-[100px] items-center">
           <button
@@ -47,7 +56,7 @@ const Navigation: React.FC<NavigationProps> = ({ onToggleSidebar, isSidebarOpen 
             )}
           </button>
         </div>
-        
+
         {/* Center - Logo and Brand */}
         <div className="flex items-center gap-3">
           <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-white/30 shadow-sm">

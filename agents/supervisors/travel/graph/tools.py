@@ -107,18 +107,20 @@ async def _send_a2a_message(agent_card, message: str) -> str:
         # Send message and get response
         logger.info(f"Sending A2A message to {agent_card.name}...")
         response = await client.send_message(request)
-        logger.info(f"Response received from A2A agent: {response}")
+        logger.info("Response received from A2A agent %s", agent_card.name)
         
         # Parse response (matching the exact pattern from original code)
-        if response.root.result and response.root.result.parts:
-            part = response.root.result.parts[0].root
+        error = getattr(response.root, "error", None)
+        if error:
+            raise A2AAgentError(f"Error from '{agent_card.name}': {error.message}")
+        result = getattr(response.root, "result", None)
+        parts = getattr(result, "parts", None)
+        if parts:
+            part = parts[0].root
             if hasattr(part, "text"):
                 return part.text.strip()
             else:
                 raise A2AAgentError(f"Agent '{agent_card.name}' returned result without text content.")
-        elif response.root.error:
-            logger.error(f"A2A error from '{agent_card.name}': {response.root.error.message}")
-            raise A2AAgentError(f"Error from '{agent_card.name}': {response.root.error.message}")
         else:
             logger.error(f"Unknown response type from '{agent_card.name}'.")
             raise A2AAgentError(f"Unknown response type from '{agent_card.name}'.")
@@ -305,11 +307,9 @@ async def get_flights_via_a2a(
         if result.get("status") == "success":
             return result.get("flights", [])
         else:
-            logger.error(f"Flight search failed: {result.get('message')}")
-            return []
+            raise A2AAgentError(result.get("message") or "Flight agent search failed")
     except json.JSONDecodeError:
-        logger.error(f"Failed to parse flight results: {result_json}")
-        return []
+        raise A2AAgentError("Flight agent returned an invalid response") from None
 
 
 async def get_hotels_via_a2a(location: str, check_in_date: str, check_out_date: str) -> list:
@@ -333,11 +333,9 @@ async def get_hotels_via_a2a(location: str, check_in_date: str, check_out_date: 
         if result.get("status") == "success":
             return result.get("hotels", [])
         else:
-            logger.error(f"Hotel search failed: {result.get('message')}")
-            return []
+            raise A2AAgentError(result.get("message") or "Hotel agent search failed")
     except json.JSONDecodeError:
-        logger.error(f"Failed to parse hotel results: {result_json}")
-        return []
+        raise A2AAgentError("Hotel agent returned an invalid response") from None
 
 
 # =============================================================================
@@ -392,11 +390,9 @@ async def get_activities_via_a2a(location: str, activity_type: str = "things to 
         if result.get("status") == "success":
             return result.get("activities", [])
         else:
-            logger.error(f"Activity search failed: {result.get('message')}")
-            return []
+            raise A2AAgentError(result.get("message") or "Activity agent search failed")
     except json.JSONDecodeError:
-        logger.error(f"Failed to parse activity results: {result_json}")
-        return []
+        raise A2AAgentError("Activity agent returned an invalid response") from None
 
 
 @tool

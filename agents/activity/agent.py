@@ -9,6 +9,7 @@ Uses SerpAPI to search for activities, attractions, and things to do.
 """
 
 import logging
+import json
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.graph.state import CompiledStateGraph
@@ -80,10 +81,6 @@ class ActivitySearchAgent:
                 activity_type=params.get("activity_type", "things to do"),
             )
             
-            if not activities:
-                return {"messages": [AIMessage(
-                    content=f"No activities found in {params['location']}"
-                )]}
             
             # Format the response
             response = self._format_activities_response(activities, params)
@@ -91,7 +88,7 @@ class ActivitySearchAgent:
             
         except Exception as e:
             logger.error(f"Error searching activities: {e}")
-            return {"messages": [AIMessage(content=f"Error searching activities: {str(e)}")]}
+            return {"messages": [AIMessage(content=json.dumps({"status": "error", "message": str(e)}))]}
     
     def _parse_request(self, message: str) -> dict:
         """

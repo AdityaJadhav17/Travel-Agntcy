@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useState, useEffect } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { createPortal } from "react-dom"
 import { PolicyData } from "./types"
 import { CustomNodeData } from "../Elements/types"
@@ -35,15 +35,9 @@ const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (isOpen && nodeData) {
-      fetchPolicyDetailsData()
-    }
-  }, [isOpen, nodeName, nodeData])
-
   useEscapeKey(isOpen, onClose)
 
-  const fetchPolicyDetailsData = async () => {
+  const fetchPolicyDetailsData = useCallback(async () => {
     setLoading(true)
     setError(null)
 
@@ -60,7 +54,11 @@ const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
     } finally {
       setLoading(false)
     }
-  }
+  }, [nodeData])
+
+  useEffect(() => {
+    if (isOpen) void fetchPolicyDetailsData()
+  }, [isOpen, fetchPolicyDetailsData])
 
   if (!isOpen) return null
 
