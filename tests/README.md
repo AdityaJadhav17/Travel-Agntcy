@@ -104,3 +104,7 @@ jobs:
       docker_overrides: |
         slim=ghcr.io/agntcy/slim:0.5.0
 ```
+Conversation regression cases live in `tests/travel/test_conversations.py` and run
+with the same `pytest tests/travel -q` command. They use temporary SQLite databases
+and mocked model/provider boundaries, covering persistence, isolation, corrections,
+clarification, retry deduplication, deletion, revision conflicts and invalid dates.

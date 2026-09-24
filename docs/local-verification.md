@@ -110,5 +110,30 @@ No credentials were changed or published. No commits or remote pushes were made.
   were stopped during initial restoration; their data was not deleted.
 - Vite reports a roughly 549 kB main bundle; code splitting is future work.
 - An upstream A2A SDK deprecation warning remains in tests.
-- The API is stateless per request and the UI parses Markdown. A versioned
-  structured response schema and conversation state remain separate improvements.
+- The UI still parses Markdown. A versioned structured response schema remains
+  future work. Conversation memory is implemented in the follow-up below.
+
+## Conversation implementation follow-up
+
+See [personas, stories, and phased plan](conversation-improvement-plan.md).
+Phase 1 now persists local chat turns and structured trip state, handles short
+clarification replies and corrections, validates missing/invalid dates before
+search, and preserves memory through Docker recreation with a named volume.
+
+- 29 backend tests passed in Docker, including concurrent writers, persistence,
+  isolation, idempotent completed requests, rollback, deletion and date validation.
+- Frontend lint (zero warnings), formatting, types and build passed.
+- A real browser conversation supplied destination, origin, and dates separately;
+  the supervisor was recreated before the dates-only turn and retained DFW/JFK.
+- Live result: round-trip flights $211 plus a three-night hotel $375, total $586,
+  with five activities. This was a time-specific quote, not a booking price.
+- `scripts/conversation_smoke_test.py` passed with the actual configured model:
+  destination New York, short reply Dallas, then destination correction to Boston.
+  Its temporary API conversation was deleted afterwards.
+- The implementation retains local browser history and bounds backend context.
+  It has no account authentication/cross-device sync; persistent storage for Helm,
+  constraint enforcement, result schema and conversational streaming are later work.
+
+Browser chat-switch verification also passed: a pending Tokyo reply completed
+in its own chat while the New York result remained unchanged. Reopening Tokyo
+asked for its origin, confirming that Dallas did not leak from the other chat.

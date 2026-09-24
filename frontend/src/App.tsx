@@ -27,10 +27,13 @@ import { Plane } from "lucide-react"
 interface ApiResponse {
   response: string
   session_id?: string
+  conversation_id?: string
+  trip_state?: Record<string, unknown>
 }
 
 export interface ChatHistoryItem {
   id: string
+  conversationId?: string
   title: string
   timestamp: Date
   messages: Array<{
@@ -42,7 +45,11 @@ export interface ChatHistoryItem {
 const CHAT_HISTORY_KEY = "travel_chat_history"
 
 const App: React.FC = () => {
-  const { sendMessage } = useAgentAPI()
+  const { sendMessage, deleteConversation } = useAgentAPI()
+  const activeChatRef = useRef<string | null>(null)
+  const pendingChats = useRef(new Set<string>())
+  const deletedChats = useRef(new Set<string>())
+  const [historyError, setHistoryError] = useState("")
 
   const [selectedPattern, setSelectedPattern] = useState<PatternType>(
     PATTERNS.TRAVEL_SEARCH,
@@ -61,7 +68,19 @@ const App: React.FC = () => {
 
   // Chat history state
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
-  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>([])
+  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || "[]")
+      return Array.isArray(saved)
+        ? saved.map((chat: ChatHistoryItem) => ({
+            ...chat,
+            timestamp: new Date(chat.timestamp),
+          }))
+        : []
+    } catch {
+      return []
+    }
+  })
   const [conversationMessages, setConversationMessages] = useState<
     Array<{ role: "user" | "assistant"; content: string }>
   >([])
@@ -77,28 +96,13 @@ const App: React.FC = () => {
     scrollToBottom()
   }, [conversationMessages, isAgentLoading])
 
-  // Load chat history from localStorage on mount
   useEffect(() => {
-    const savedHistory = localStorage.getItem(CHAT_HISTORY_KEY)
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory)
-        setChatHistory(
-          parsed.map((h: any) => ({
-            ...h,
-            timestamp: new Date(h.timestamp),
-          })),
-        )
-      } catch (e) {
-        console.error("Error loading chat history:", e)
-      }
-    }
-  }, [])
-
-  // Save chat history to localStorage whenever it changes
-  useEffect(() => {
-    if (chatHistory.length > 0) {
+    try {
       localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory))
+    } catch {
+      setHistoryError(
+        "Browser storage is full or unavailable. Chat history may not survive a reload.",
+      )
     }
   }, [chatHistory])
 
@@ -114,12 +118,22 @@ const App: React.FC = () => {
   }, [])
 
   const [messages, setMessages] = useState<Message[]>(() => {
-    const saved = localStorage.getItem(LOCAL_STORAGE_KEY)
-    return saved ? JSON.parse(saved) : []
+    try {
+      const saved = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || "[]")
+      return Array.isArray(saved) ? saved : []
+    } catch {
+      return []
+    }
   })
 
   useEffect(() => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(messages))
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(messages))
+    } catch {
+      setHistoryError(
+        "Browser storage is full or unavailable. Chat history may not survive a reload.",
+      )
+    }
   }, [messages])
 
   useEffect(() => {
@@ -138,101 +152,84 @@ const App: React.FC = () => {
   const chatHeightValue = currentUserMessage || agentResponse ? chatHeight : 76
 
   const handleUserInput = async (query: string) => {
+    const chatId = activeChatRef.current || crypto.randomUUID()
+    if (pendingChats.current.has(chatId)) return
+    const existingChat = chatHistory.find((chat) => chat.id === chatId)
+    const conversationId = existingChat?.conversationId || crypto.randomUUID()
+    activeChatRef.current = chatId
+    setCurrentChatId(chatId)
+    pendingChats.current.add(chatId)
+    setHistoryError("")
     setCurrentUserMessage(query)
     setIsAgentLoading(true)
     setButtonClicked(true)
     setAiReplied(false)
     setApiError(false)
     setShowFinalResponse(true)
-
-    const userMessage = { role: "user" as const, content: query }
-    const newMessages = [...conversationMessages, userMessage]
+    const newMessages = [
+      ...conversationMessages,
+      { role: "user" as const, content: query },
+    ]
     setConversationMessages(newMessages)
-
-    try {
-      const response = await sendMessage(query, selectedPattern)
-      handleApiResponse(response, false, query, newMessages)
-    } catch (error) {
-      logger.apiError("/agent/prompt", error)
-      const errMessage = error instanceof Error ? error.message : String(error)
-      handleApiResponse(errMessage, true, query, newMessages)
+    const entry: ChatHistoryItem = {
+      id: chatId,
+      conversationId,
+      title:
+        existingChat?.title ||
+        (query.length > 35 ? query.substring(0, 35) + "..." : query),
+      timestamp: new Date(),
+      messages: newMessages,
     }
+    setChatHistory((previous) => [
+      entry,
+      ...previous.filter((chat) => chat.id !== chatId),
+    ])
+    let response: ApiResponse
+    let failed = false
+    try {
+      response = await sendMessage(query, selectedPattern, conversationId)
+    } catch (error) {
+      failed = true
+      logger.apiError("/agent/prompt", error)
+      response = {
+        response: error instanceof Error ? error.message : String(error),
+      }
+    }
+    pendingChats.current.delete(chatId)
+    if (deletedChats.current.has(chatId)) return
+    const updatedMessages = [
+      ...newMessages,
+      { role: "assistant" as const, content: response.response },
+    ]
+    setChatHistory((previous) =>
+      previous.map((chat) =>
+        chat.id === chatId ? { ...chat, messages: updatedMessages } : chat,
+      ),
+    )
+    if (activeChatRef.current !== chatId) return
+    setConversationMessages(updatedMessages)
+    setAgentResponse(response)
+    setIsAgentLoading(false)
+    setButtonClicked(false)
+    setAiReplied(true)
+    setApiError(failed)
   }
 
-  const handleApiResponse = useCallback(
-    (
-      response: ApiResponse | string,
-      isError: boolean = false,
-      userQuery?: string,
-      currentMessages?: Array<{ role: "user" | "assistant"; content: string }>,
-    ) => {
-      let apiResp: ApiResponse
-      if (typeof response === "string") {
-        apiResp = { response }
-      } else {
-        apiResp = response
-      }
-      setAgentResponse(apiResp)
-      setIsAgentLoading(false)
-      setAiReplied(true)
-      setApiError(isError)
-
-      const assistantMessage = {
-        role: "assistant" as const,
-        content: apiResp.response,
-      }
-      const messagesToUse = currentMessages || conversationMessages
-      const updatedMessages = [...messagesToUse, assistantMessage]
-      setConversationMessages(updatedMessages)
-
-      const queryToUse = userQuery || currentUserMessage
-      if (queryToUse) {
-        if (currentChatId) {
-          setChatHistory((prev) =>
-            prev.map((chat) =>
-              chat.id === currentChatId
-                ? { ...chat, messages: updatedMessages, timestamp: new Date() }
-                : chat,
-            ),
-          )
-        } else {
-          const title =
-            queryToUse.length > 35
-              ? queryToUse.substring(0, 35) + "..."
-              : queryToUse
-
-          const newChat: ChatHistoryItem = {
-            id: `chat_${Date.now()}`,
-            title: title,
-            timestamp: new Date(),
-            messages: updatedMessages,
-          }
-
-          setChatHistory((prev) => [newChat, ...prev].slice(0, 15))
-          setCurrentChatId(newChat.id)
-        }
-      }
-
-      setMessages((prev) => {
-        const updated = [...prev]
-        if (updated.length > 0) {
-          updated[updated.length - 1] = {
-            ...updated[updated.length - 1],
-            content: apiResp.response,
-            animate: !isError,
-          }
-        }
-        return updated
-      })
-    },
-    [setMessages, currentChatId, conversationMessages, currentUserMessage],
-  )
+  const handleApiResponse = (
+    response: ApiResponse | string,
+    isError = false,
+  ) => {
+    setAgentResponse(typeof response === "string" ? { response } : response)
+    setApiError(isError)
+  }
 
   const handleDropdownSelect = async (query: string) => {
     handleUserInput(query)
   }
 
   const handleClearConversation = () => {
+    activeChatRef.current = null
+    setHistoryError("")
     setMessages([])
     setCurrentUserMessage("")
     setAgentResponse(undefined)
@@ -260,6 +257,15 @@ const App: React.FC = () => {
   const handleSelectChat = (chatId: string) => {
     const selectedChat = chatHistory.find((chat) => chat.id === chatId)
     if (selectedChat && selectedChat.messages.length > 0) {
+      setAgentResponse(undefined)
+      setApiError(false)
+      activeChatRef.current = chatId
+      setIsAgentLoading(pendingChats.current.has(chatId))
+      setHistoryError(
+        selectedChat.conversationId
+          ? ""
+          : "This older chat has no saved AI memory. Please restate your trip details once.",
+      )
       setCurrentChatId(chatId)
       setConversationMessages(selectedChat.messages)
 
@@ -282,10 +288,19 @@ const App: React.FC = () => {
     }
   }
 
-  const handleDeleteChat = (chatId: string) => {
-    setChatHistory((prev) => prev.filter((chat) => chat.id !== chatId))
-    if (currentChatId === chatId) {
-      handleClearConversation()
+  const handleDeleteChat = async (chatId: string) => {
+    const chat = chatHistory.find((item) => item.id === chatId)
+    try {
+      if (chat?.conversationId) await deleteConversation(chat.conversationId)
+      deletedChats.current.add(chatId)
+      setChatHistory((previous) =>
+        previous.filter((item) => item.id !== chatId),
+      )
+      if (activeChatRef.current === chatId) handleClearConversation()
+    } catch {
+      setHistoryError(
+        "Could not delete the saved conversation. Please try again.",
+      )
     }
   }
 
@@ -317,6 +332,11 @@ const App: React.FC = () => {
           <div
             className={`flex flex-1 flex-col bg-[#212121] ${isSidebarOpen ? "border-l border-gray-800" : ""}`}
           >
+            {historyError && (
+              <p role="status" className="px-4 py-2 text-sm text-amber-200">
+                {historyError}
+              </p>
+            )}
             {/* Main content area - scrollable */}
             <div className="relative flex-1 overflow-y-auto">
               {/* New Chat Welcome View - Graph + Welcome Section */}

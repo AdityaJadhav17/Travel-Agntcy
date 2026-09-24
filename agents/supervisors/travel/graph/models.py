@@ -10,7 +10,7 @@ proper parsing of user travel requests.
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Literal
 
 
 class TravelSearchArgs(BaseModel):
@@ -45,7 +45,8 @@ class TravelSearchArgs(BaseModel):
         Hotel only: "Find hotels in Paris for March 1-5"
         Activity only: "What things to do in San Francisco?"
     """
-    search_type: str = Field(
+    clarification_question: str = Field(default="", description="A short question for ambiguous input; empty when unambiguous")
+    search_type: Literal["full_trip", "flight_only", "hotel_only", "activity_only"] = Field(
         default="full_trip",
         description="Type of search: 'full_trip' (flight+hotel+activities), 'flight_only', 'hotel_only', 'activity_only'"
     )

@@ -102,9 +102,8 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                   <div className="space-y-0.5">
                     {chats.map((chat) => (
-                      <button
+                      <div
                         key={chat.id}
-                        onClick={() => handleSelectChat(chat.id)}
                         onMouseEnter={() => setHoveredChatId(chat.id)}
                         onMouseLeave={() => setHoveredChatId(null)}
                         className={`group relative flex w-full items-center rounded-lg px-3 py-2 text-left transition-colors ${
@@ -113,15 +112,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                             : "hover:bg-[#2f2f2f]/50"
                         }`}
                       >
-                        <span className="flex-1 truncate text-sm text-gray-300">
+                        <button
+                          onClick={() => handleSelectChat(chat.id)}
+                          className="min-w-0 flex-1 truncate pr-6 text-left text-sm text-gray-300"
+                        >
                           {chat.title}
-                        </span>
+                        </button>
 
                         {/* Actions on hover */}
                         {(hoveredChatId === chat.id ||
                           currentChatId === chat.id) && (
                           <div className="absolute right-2 flex items-center gap-1">
                             <button
+                              aria-label={`Delete chat: ${chat.title}`}
                               onClick={(e) => handleDeleteChat(e, chat.id)}
                               className="rounded p-1 text-gray-400 transition-colors hover:bg-[#404040] hover:text-red-400"
                             >
@@ -129,7 +132,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </button>
                           </div>
                         )}
-                      </button>
+                      </div>
                     ))}
                   </div>
                 </div>

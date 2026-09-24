@@ -14,11 +14,18 @@ import { shouldEnableRetries, getApiUrlForPattern } from "@/utils/patternUtils"
 interface ApiResponse {
   response: string
   session_id?: string
+  conversation_id?: string
+  trip_state?: Record<string, unknown>
 }
 
 interface UseAgentAPIReturn {
   loading: boolean
-  sendMessage: (prompt: string, pattern?: string) => Promise<ApiResponse>
+  sendMessage: (
+    prompt: string,
+    pattern?: string,
+    conversationId?: string,
+  ) => Promise<ApiResponse>
+  deleteConversation: (conversationId: string) => Promise<void>
   sendMessageWithCallback: (
     prompt: string,
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>,
@@ -60,6 +67,7 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
   const sendMessage = async (
     prompt: string,
     pattern?: string,
+    conversationId?: string,
   ): Promise<ApiResponse> => {
     if (!prompt.trim()) {
       throw new Error("Prompt cannot be empty")
@@ -73,10 +81,11 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     const myRequestId = requestIdRef.current + 1
     requestIdRef.current = myRequestId
 
+    const requestId = uuid()
     const makeApiCall = async (): Promise<ApiResponse> => {
       const response = await axios.post<ApiResponse>(
         `${apiUrl}/agent/prompt`,
-        { prompt },
+        { prompt, conversation_id: conversationId, request_id: requestId },
         {
           signal: controller.signal,
           withCredentials: !isLocalDev,
@@ -245,7 +254,14 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     }
   }
 
+  const deleteConversation = async (conversationId: string) => {
+    await axios.delete(
+      `${getApiUrlForPattern()}/conversations/${conversationId}`,
+    )
+  }
+
   return {
+    deleteConversation,
     loading,
     sendMessage,
     sendMessageWithCallback,

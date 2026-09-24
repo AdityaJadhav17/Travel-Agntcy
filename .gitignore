@@ -10,5 +10,7 @@
 *.log
 frontend/dist/
 .runtime/
+*.sqlite3
+*.sqlite3-*
 published_cids.json
 oasf_records/*_Search_Agent.json

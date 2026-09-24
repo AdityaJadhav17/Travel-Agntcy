@@ -210,8 +210,8 @@ No frontend unit-test runner is currently configured.
 - UI cannot reach API: check its browser-accessible VITE URL and rebuild the UI.
 - No hotels: the parser uses numeric SerpAPI prices, including `US$` displays;
   truly empty results still depend on location, dates and upstream availability.
-- Use future dates. Requests without dates return a clarification; the API does
-  not retain a conversation across requests.
+- Use future dates. Requests without required dates return a clarification.
+  The UI now remembers each chat; API callers opt in using a conversation ID.
 - Tracing is disabled by default. Enable it with the observability profile when
   needed; no collector is required for the core search path.
 - Round-trip return details use the outbound departure token. Only the three
@@ -238,3 +238,38 @@ Dependencies are restored from package-lock.json; node_modules is not tracked.
 See [local Kubernetes deployment](deployment/README.md) for the updated core Helm
 chart, and [directory integration](docs/agent_directory_integration.md) for optional
 travel agent publication. Compose remains the end-to-end verified runtime.
+
+## Conversation memory
+
+The UI assigns each new chat a stable conversation UUID and sends it with a unique
+request UUID to `POST /agent/prompt`. API clients can use:
+
+```json
+{"prompt":"Dallas", "conversation_id":"<same UUID for this chat>", "request_id":"<new UUID for this message>"}
+```
+
+The response retains `response` and `session_id` (a tracing ID) and adds
+`conversation_id` and `trip_state`. Reuse a request UUID only to retry the same
+message; the last 10 completed requests are cached. Conflicting concurrent writes
+return HTTP 409. Requests without a conversation ID remain stateless and compatible.
+The streaming endpoint currently supports only the stateless path.
+
+Conversation messages and extracted trip details are stored in SQLite. Compose
+mounts the `travel-conversations` volume at `/data`; restarts and rebuilds retain it.
+Do not use `docker compose down -v` unless you intend to erase saved backend memory.
+Native runs use `.runtime/conversations.sqlite3`, overridable via
+`TRAVEL_CONVERSATION_DB`. The last 40 messages are retained, with up to 12 recent
+messages plus structured trip details passed into a graph turn. Older chats from
+before this feature display a notice asking you to restate trip details once.
+
+Deleting a sidebar chat calls `DELETE /conversations/{uuid}` and removes its backend
+messages, trip details, and cached responses. An ID-only tombstone prevents an
+in-flight request from recreating deleted content. Browser history remains local;
+there is no cross-device history sync or account authentication in this phase.
+This is a local single-user implementation. Kubernetes defaults do not yet mount
+persistent conversation storage; use Compose for durable memory in this phase.
+
+See [the improvement plan](docs/conversation-improvement-plan.md) for personas,
+user stories, acceptance criteria, and subsequent phases. Budget/passenger-count
+enforcement, grounded result explanations, structured cards, and conversational
+streaming are still planned; remembering a message does not enforce its constraints.

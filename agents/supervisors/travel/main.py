@@ -17,18 +17,21 @@ by searching SerpAPI and applying timing constraints.
 import logging
 import json
 from pathlib import Path
+from uuid import UUID
+from asyncio import to_thread
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 import uvicorn
 from agntcy_app_sdk.factory import AgntcyFactory
 from ioa_observe.sdk.tracing import session_start
 
 from agents.supervisors.travel.graph.graph import TravelGraph
 from agents.supervisors.travel.graph import shared
+from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict
 from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED
 from config.logging_config import setup_logging
 from common.version import get_version_info
@@ -62,11 +65,14 @@ app.add_middleware(
 
 # Initialize the travel graph (LangGraph workflow)
 travel_graph = TravelGraph()
+conversation_store = ConversationStore()
 
 
 class PromptRequest(BaseModel):
     """Request model for travel planning prompts."""
-    prompt: str
+    prompt: str = Field(max_length=12000)
+    conversation_id: UUID | None = None
+    request_id: UUID | None = None
 
     @field_validator("prompt")
     @classmethod
@@ -137,16 +143,41 @@ async def handle_prompt(request: PromptRequest):
     """
     try:
         with session_start() as session_id:
+            if request.conversation_id:
+                if not request.request_id:
+                    raise HTTPException(422, "request_id is required for a conversation turn")
+                conversation_id = str(request.conversation_id)
+                request_id = str(request.request_id)
+                saved = await to_thread(conversation_store.load, conversation_id)
+                cached = saved["requests"].get(request_id)
+                if cached:
+                    if cached["prompt"] != request.prompt:
+                        raise HTTPException(409, "This request ID was already used for another message")
+                    return cached["result"]
+                turn = await travel_graph.serve_conversation(request.prompt, saved["messages"], saved["trip"])
+                result = {**turn, "conversation_id": conversation_id, "session_id": session_id["executionID"]}
+                await to_thread(conversation_store.save, conversation_id, saved, request_id, request.prompt, result)
+                return result
             # Execute the travel graph and wait for completion
             result = await travel_graph.serve(request.prompt)
             logger.info(f"Travel search completed, session: {session_id['executionID']}")
             return {"response": result, "session_id": session_id["executionID"]}
+    except HTTPException:
+        raise
+    except ConversationConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     except ValueError as ve:
         logger.error(f"Invalid input: {ve}")
         raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         logger.error(f"Error processing travel request: {e}")
-        raise HTTPException(status_code=500, detail=f"Operation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Travel request failed. Please try again.")
+
+
+@app.delete("/conversations/{conversation_id}", status_code=204)
+async def delete_conversation(conversation_id: UUID):
+    """Delete local conversation memory; account ownership is a future deployment requirement."""
+    await to_thread(conversation_store.delete, str(conversation_id))
 
 
 @app.post("/agent/prompt/stream")
@@ -171,6 +202,9 @@ async def handle_stream_prompt(request: PromptRequest):
         {"response": "Found 15 flights...", "session_id": "..."}
         {"response": "Best deal: $1,234 total...", "session_id": "..."}
     """
+    if request.conversation_id:
+        raise HTTPException(400, "Conversation streaming is not supported yet; use /agent/prompt")
+
     async def stream_generator():
         # Keep the tracing context alive for the entire asynchronous iteration.
         with session_start() as session_id:

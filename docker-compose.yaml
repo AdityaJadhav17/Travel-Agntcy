@@ -125,6 +125,8 @@ services:
   # =============================================================================
   # Main travel planning agent that coordinates Flight, Hotel, and Activity agents via A2A
   travel-supervisor:
+    volumes:
+      - travel-conversations:/data
     build:
       context: .
       dockerfile: docker/Dockerfile.travel-supervisor
@@ -134,6 +136,7 @@ services:
       - .env
     environment:
       # Transport settings (NATS for A2A communication)
+      - TRAVEL_CONVERSATION_DB=/data/conversations.sqlite3
       - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
       - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
@@ -405,3 +408,6 @@ services:
       - "31234:31234"
     profiles:
       - oasf-translate
+
+volumes:
+  travel-conversations:
