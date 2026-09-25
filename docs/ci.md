@@ -11,7 +11,7 @@ does not itself change repository branch protection.
 | --- | --- |
 | Frontend | ESLint without fixes, Prettier, TypeScript (including E2E sources), Vite production build, npm audit including development dependencies |
 | Python | Ruff on application/configuration/scripts and current travel tests; unit/API regressions; JUnit and coverage XML; 90% branch-inclusive coverage floor on the conversation repository/turn coordinator and budget decisions |
-| Python audit | `uv export --locked --group ci` and pip-audit on the resolved runtime and CI dependencies; any reported advisory blocks |
+| Python audit | `uv export --locked --group ci`, full pip-audit report, and fail-closed enforcement of exact, time-limited exceptions; unapproved findings block |
 | E2E | Chromium and Firefox against nginx, FastAPI, SQLite, three agent services and NATS; separate API restart-persistence probe |
 | Infrastructure | actionlint, redacted Gitleaks source scan, tracked-file hygiene, Linux report-permission regression, strict Helm lint, builds of all five production images |
 
@@ -19,7 +19,14 @@ GitHub Actions are pinned to full commit SHAs. Jobs have read-only repository
 permissions, explicit timeouts, and no application secrets. Superseded PR runs
 are cancelled. Reports, traces, screenshots, videos on failure, and CI service
 logs are retained for 14 days. Dependabot checks Actions, npm, uv and Docker
-weekly. No audit findings are allowlisted or configured to continue on error.
+weekly. No audit job is configured to continue on error. Python audit exceptions
+are recorded in `scripts/ci/audit_exceptions.json` (currently empty). Each requires
+an exact package, version and advisory ID, a reason, and an approval/expiry window
+of at most 14 days. They fail at 00:00 UTC on the expiry date and stop applying
+as soon as the scanner reports a fixed version. Findings remain in the raw JSON;
+accepted findings also emit a workflow warning and appear in the job summary.
+Scanner errors, skipped dependencies, incomplete reports, and unused exceptions
+fail the check. No exception is inferred from an advisory alias or wildcard.
 
 The credential scan covers the current source tree, not a forensic scan of Git
 history. Dependency audits cover application packages, not OS packages inside
@@ -73,13 +80,15 @@ network):
 ```sh
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks sh -c 'npm audit --audit-level=low --json > /reports/npm-audit.json'
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv export --locked --group ci --no-emit-project --no-hashes -o /reports/python-requirements.txt
-docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync pip-audit -r /reports/python-requirements.txt --no-deps --disable-pip --format json -o /reports/python-audit.json
+docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync python scripts/ci/audit_policy.py --requirements /reports/python-requirements.txt --report /reports/python-audit.json --decision /reports/python-audit-decision.json
 ```
 
-`--no-deps --disable-pip` audits the fully resolved export without installing or
+The policy runner invokes pip-audit with `--no-deps --disable-pip` to audit the
+fully resolved export without installing or
 resolving packages a second time. `--locked` fails on manifest/lockfile drift;
 image builds also restore dependencies with `uv sync --locked` and `npm ci`.
-Audit-tool/network failures also fail the check.
+It also compares the scan's package names and versions against every applicable
+requirement in the export. Audit-tool/network failures also fail the check.
 
 Reports appear under `.runtime/ci/` (ignored by Git). View
 `.runtime/ci/playwright-report/index.html` for browser results. Capture logs before

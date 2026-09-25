@@ -90,11 +90,23 @@ jobs:
         run: >-
           docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks
           uv export --locked --group ci --no-emit-project --no-hashes -o /reports/python-requirements.txt
-      - name: Audit every resolved package (any advisory fails)
+      - name: Audit every resolved package and enforce exception expiry
         run: >-
           docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks
-          uv run --no-sync pip-audit -r /reports/python-requirements.txt
-          --no-deps --disable-pip --format json -o /reports/python-audit.json
+          uv run --no-sync python scripts/ci/audit_policy.py
+          --requirements /reports/python-requirements.txt
+          --report /reports/python-audit.json --decision /reports/python-audit-decision.json
+      - name: Show audit policy result
+        if: always()
+        run: |
+          if [ -f .runtime/ci/python-audit-decision.json ]; then
+            {
+              echo '### Python audit policy result'
+              echo '```json'
+              cat .runtime/ci/python-audit-decision.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()
         with:
@@ -102,6 +114,7 @@ jobs:
           path: |
             .runtime/ci/python-requirements.txt
             .runtime/ci/python-audit.json
+            .runtime/ci/python-audit-decision.json
           include-hidden-files: true
           retention-days: 14
 

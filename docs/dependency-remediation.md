@@ -48,6 +48,18 @@ finding retained in the report and automatic failure after expiry. No exception
 has been added. An upstream fixed release or a separately reviewed replacement
 of the tracing SDK's mandatory LlamaIndex dependency would remove the blocker.
 
+The follow-up `scripts/ci/audit_policy.py` implements that bounded policy and is
+wired into CI, with an **empty exception list** pending a maintainer decision.
+It retains the complete scanner report, emits a separate policy decision artifact,
+and validates that every applicable exported dependency was actually scanned.
+Its 29 regression cases cover expiry, additional advisories, changed versions,
+published fixes, malformed/incomplete reports, and scanner failure. The proposed
+NLTK-only exception would expire on **2026-10-09 at 00:00 UTC**; it has not been
+enabled. The real scan with the empty policy still exits 1 on the NLTK advisory.
+The complete backend suite now passes 86 tests with 98.68% targeted coverage;
+Ruff and actionlint also pass. Application dependencies and runtime behavior
+are unchanged by this follow-up.
+
 ## Validation
 
 Verified locally in Docker after the dependency updates:
