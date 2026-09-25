@@ -7,7 +7,7 @@ ARG VITE_EXCHANGE_APP_API_URL=http://127.0.0.1:8000
 ARG VITE_GRAFANA_URL=http://127.0.0.1:3001
 RUN npm run typecheck && npm run build
 
-FROM nginx:1.28-alpine
+FROM nginx:1.29-alpine
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 EXPOSE 3000
