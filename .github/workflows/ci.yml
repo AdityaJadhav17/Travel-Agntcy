@@ -28,6 +28,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Prepare runner-owned reports
+        run: sh scripts/ci/prepare_reports.sh
       - run: docker compose -p travel-ci -f compose.ci.yaml build frontend-checks
       - name: Lint, formatting, TypeScript and production build
         run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks
@@ -50,6 +52,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Prepare runner-owned reports
+        run: sh scripts/ci/prepare_reports.sh
       - run: docker compose -p travel-ci -f compose.ci.yaml build python-checks
       - name: Ruff
         run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync ruff check agents common config services scripts tests/travel tests/e2e
@@ -79,6 +83,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Prepare runner-owned reports
+        run: sh scripts/ci/prepare_reports.sh
       - run: docker compose -p travel-ci -f compose.ci.yaml build python-checks
       - name: Export the locked runtime and CI tool dependencies
         run: >-
@@ -107,6 +113,8 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+      - name: Prepare runner-owned reports before Docker mounts them
+        run: sh scripts/ci/prepare_reports.sh
       - name: Build isolated test stack
         run: docker compose -p travel-ci -f compose.ci.yaml build python-checks ui e2e
       - name: Start real application services with external provider fixtures
@@ -153,6 +161,8 @@ jobs:
         run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.3 dir /repo --redact --verbose
       - name: Reject tracked generated files and credentials
         run: python3 scripts/ci/check_hygiene.py
+      - name: Verify report permissions with a Linux runner UID
+        run: docker run --rm -v "$PWD/scripts/ci:/scripts:ro" python:3.13-slim python /scripts/check_report_permissions.py
       - name: Lint Helm charts
         run: |
           docker run --rm -v "$PWD:/repo" -w /repo alpine/helm:3.17.3 lint --strict deployment/helm/local-cluster

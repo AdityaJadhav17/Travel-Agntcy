@@ -13,7 +13,7 @@ does not itself change repository branch protection.
 | Python | Ruff on application/configuration/scripts and current travel tests; unit/API regressions; JUnit and coverage XML; 90% branch-inclusive coverage floor on the conversation repository/turn coordinator and budget decisions |
 | Python audit | `uv export --locked --group ci` and pip-audit on the resolved runtime and CI dependencies; any reported advisory blocks |
 | E2E | Chromium and Firefox against nginx, FastAPI, SQLite, three agent services and NATS; separate API restart-persistence probe |
-| Infrastructure | actionlint, redacted Gitleaks source scan, tracked-file hygiene, strict Helm lint, builds of all five production images |
+| Infrastructure | actionlint, redacted Gitleaks source scan, tracked-file hygiene, Linux report-permission regression, strict Helm lint, builds of all five production images |
 
 GitHub Actions are pinned to full commit SHAs. Jobs have read-only repository
 permissions, explicit timeouts, and no application secrets. Superseded PR runs
@@ -48,6 +48,11 @@ No test uses a real user's conversation or the developer's conversation volume.
 ## Run locally with Docker
 
 From the repository root (Docker Compose v2 required):
+
+Create the report directories as the checkout owner before Docker mounts them.
+On Linux/macOS, run `sh scripts/ci/prepare_reports.sh`; in PowerShell, run
+`New-Item -ItemType Directory -Force .runtime/ci/playwright, .runtime/ci/playwright-report`.
+This prevents Docker from creating a root-owned parent that blocks CI log collection.
 
 ```sh
 docker compose -p travel-ci -f compose.ci.yaml build python-checks frontend-checks ui e2e
@@ -88,18 +93,16 @@ docker compose -p travel-ci -f compose.ci.yaml --profile e2e down -v --remove-or
 The exact project name and file above target **only CI test data**. Do not run
 volume cleanup against the normal developer Compose project.
 
-## Initial audit blocker
+## Dependency audit status
 
-On 2026-09-24, npm audit reported zero vulnerabilities. The locked Python runtime
-and CI dependency export reported **403 advisories across 42 packages**. The gate
-intentionally fails until those findings are remediated. Counts reflect scanner
-reports, not an assessment that every advisory is exploitable in this app.
-
-Remediation needs a separate compatibility pass: inspect the JSON report's fixed
-versions, update direct dependencies in coherent groups (agent SDK/LangChain/model
-adapters together), remove unused dependencies where verified, regenerate the
-lock, then rerun unit/E2E tests and the opt-in live-provider smoke test. Review
-unfixed findings individually; do not lower the audit threshold to get green.
+On 2026-09-24, npm audit reported zero vulnerabilities. The Python runtime and CI
+audit initially reported **403 advisories across 42 packages**. Dependency updates
+and removal of unused adapters reduced the same audit to **1 advisory in NLTK
+3.10.3**, with no published fix. The gate continues to fail on that finding;
+no exception or weaker threshold has been added. See the
+[remediation notes](dependency-remediation.md) for the dependency path,
+application reachability assessment, and verification results. Counts reflect
+scanner reports, not an assessment that every advisory is exploitable in this app.
 
 The old coffee/logistics integration tests reference services outside this travel
 application and are not part of the gate. The current regression suite is
