@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: "23 8 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  frontend:
+    name: Frontend quality and audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: docker compose -p travel-ci -f compose.ci.yaml build frontend-checks
+      - name: Lint, formatting, TypeScript and production build
+        run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks
+      - name: Audit production and development dependencies
+        if: ${{ !cancelled() }}
+        run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks sh -c 'npm audit --audit-level=low --json > /reports/npm-audit.json'
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: frontend-audit
+          path: .runtime/ci/npm-audit.json
+          include-hidden-files: true
+          retention-days: 14
+
+  python:
+    name: Python lint and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: docker compose -p travel-ci -f compose.ci.yaml build python-checks
+      - name: Ruff
+        run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync ruff check agents common config services scripts tests/travel tests/e2e
+      - name: Unit and API regression tests with coverage
+        if: ${{ !cancelled() }}
+        run: >-
+          docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks
+          uv run --no-sync pytest tests/travel -q
+          --junitxml=/reports/pytest.xml
+          --cov=agents.supervisors.travel.conversations --cov-branch --cov-fail-under=90
+          --cov-report=term-missing --cov-report=xml:/reports/coverage.xml
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: python-tests-and-coverage
+          path: |
+            .runtime/ci/pytest.xml
+            .runtime/ci/coverage.xml
+          include-hidden-files: true
+          retention-days: 14
+
+  python-audit:
+    name: Python dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - run: docker compose -p travel-ci -f compose.ci.yaml build python-checks
+      - name: Export the locked runtime and CI tool dependencies
+        run: >-
+          docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks
+          uv export --locked --group ci --no-emit-project --no-hashes -o /reports/python-requirements.txt
+      - name: Audit every resolved package (any advisory fails)
+        run: >-
+          docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks
+          uv run --no-sync pip-audit -r /reports/python-requirements.txt
+          --no-deps --disable-pip --format json -o /reports/python-audit.json
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: python-dependency-audit
+          path: |
+            .runtime/ci/python-requirements.txt
+            .runtime/ci/python-audit.json
+          include-hidden-files: true
+          retention-days: 14
+
+  e2e:
+    name: Browser E2E and restart persistence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Build isolated test stack
+        run: docker compose -p travel-ci -f compose.ci.yaml build python-checks ui e2e
+      - name: Start real application services with external provider fixtures
+        run: docker compose -p travel-ci -f compose.ci.yaml up -d --no-build --wait --wait-timeout 180 ui
+      - name: Chromium and Firefox journeys
+        run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps e2e
+      - name: Save a conversation before process restart
+        run: docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/check_persistence.py seed
+      - name: Restart API and verify persisted context
+        run: |
+          docker compose -p travel-ci -f compose.ci.yaml restart api
+          docker compose -p travel-ci -f compose.ci.yaml up -d --no-build --wait --wait-timeout 120 api
+          docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/check_persistence.py verify
+      - name: Collect service logs
+        if: always()
+        run: |
+          mkdir -p .runtime/ci
+          docker compose -p travel-ci -f compose.ci.yaml logs --no-color > .runtime/ci/services.log 2>&1
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        if: always()
+        with:
+          name: browser-e2e-reports
+          path: |
+            .runtime/ci/playwright
+            .runtime/ci/playwright-report
+            .runtime/ci/services.log
+          include-hidden-files: true
+          retention-days: 14
+      - name: Clean up isolated stack and test data
+        if: always()
+        run: docker compose -p travel-ci -f compose.ci.yaml --profile e2e down -v --remove-orphans
+
+  infrastructure:
+    name: Workflow, secrets and production images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Validate Actions workflow
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color
+      - name: Scan source for credentials (redacted output)
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.3 dir /repo --redact --verbose
+      - name: Reject tracked generated files and credentials
+        run: python3 scripts/ci/check_hygiene.py
+      - name: Lint Helm charts
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo alpine/helm:3.17.3 lint --strict deployment/helm/local-cluster
+          docker run --rm -v "$PWD:/repo" -w /repo alpine/helm:3.17.3 lint --strict deployment/helm/ui
+      - name: Build production Python images from locked dependencies
+        run: |
+          for service in travel-supervisor flight-agent hotel-agent activity-agent; do
+            docker build -f "docker/Dockerfile.$service" -t "travel-ci-production-$service:local" .
+          done
+      - name: Build production UI image
+        run: docker build -f docker/Dockerfile.ui -t travel-ci-production-ui:local .
+
+  quality-gate:
+    name: Quality gate
+    if: always()
+    needs: [frontend, python, python-audit, e2e, infrastructure]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every check to pass, including scheduled audits
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          results = json.loads(os.environ['RESULTS'])
+          failed = [name for name, job in results.items() if job['result'] != 'success']
+          if failed:
+              print('Quality gate blocked by: ' + ', '.join(failed))
+              sys.exit(1)
+          print('All required checks passed.')
+          PY

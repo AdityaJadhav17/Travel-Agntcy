@@ -6,12 +6,13 @@ from uuid import uuid4
 from unittest.mock import AsyncMock
 
 import pytest
+import httpx
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 from agents.supervisors.travel import main
-from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict
+from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict, ConversationTurns
 from agents.supervisors.travel.graph.graph import TravelGraph
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 
@@ -103,6 +104,102 @@ def test_api_rejects_invalid_ids_and_unsupported_stream_memory(store):
         assert client.post('/agent/prompt', json={"prompt": "hi", "conversation_id": str(uuid4())}).status_code == 422
         assert client.post('/agent/prompt/stream', json=body("hi", str(uuid4()))).status_code == 400
         assert client.post('/agent/prompt', json={"prompt": "x" * 12001}).status_code == 422
+
+
+def test_overlapping_retries_do_not_repeat_model_work(store, monkeypatch):
+    async def scenario():
+        entered, finish = asyncio.Event(), asyncio.Event()
+
+        async def model(*_):
+            entered.set()
+            await finish.wait()
+            return {"response": "Where from?", "trip_state": {"destination": "JFK"}}
+
+        turn = AsyncMock(side_effect=model)
+        monkeypatch.setattr(main.travel_graph, "serve_conversation", turn)
+        monkeypatch.setattr(main, "conversation_turns", ConversationTurns())
+        payload = body("Plan New York", str(uuid4()))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+            first = asyncio.create_task(client.post('/agent/prompt', json=payload))
+            await asyncio.wait_for(entered.wait(), 2)
+            retry = asyncio.create_task(client.post('/agent/prompt', json=payload))
+            await asyncio.sleep(0)
+            finish.set()
+            responses = await asyncio.wait_for(asyncio.gather(first, retry), 5)
+            assert [response.status_code for response in responses] == [200, 200]
+            assert responses[0].json() == responses[1].json()
+            assert turn.await_count == 1
+            assert store.load(payload['conversation_id'])['revision'] == 1
+            assert not main.conversation_turns._active
+
+    asyncio.run(scenario())
+
+
+def test_turn_queue_allows_other_chats_and_cleans_cancelled_waiters():
+    async def scenario():
+        turns = ConversationTurns()
+        entered, finish = asyncio.Event(), asyncio.Event()
+
+        async def owner():
+            async with turns.acquire('one'):
+                entered.set()
+                await finish.wait()
+
+        async def waiter():
+            async with turns.acquire('one'):
+                pytest.fail('Cancelled waiter must not enter')
+
+        task = asyncio.create_task(owner())
+        await entered.wait()
+        waiting = asyncio.create_task(waiter())
+        await asyncio.sleep(0)
+        async with turns.acquire('another'):
+            assert not task.done()
+        waiting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiting
+        assert turns._active['one'].users == 1
+        finish.set()
+        await task
+        assert not turns._active
+        with pytest.raises(RuntimeError):
+            async with turns.acquire('one'):
+                raise RuntimeError('Provider failed')
+        async with turns.acquire('one'):
+            pass
+        assert not turns._active
+
+    asyncio.run(scenario())
+
+
+def test_queued_turn_observes_previous_saved_context(store, monkeypatch):
+    async def scenario():
+        entered, finish = asyncio.Event(), asyncio.Event()
+
+        async def model(prompt, messages, trip):
+            if prompt == 'Plan New York':
+                entered.set()
+                await finish.wait()
+                return {"response": "Where from?", "trip_state": {"destination": "JFK"}}
+            assert trip == {"destination": "JFK"}
+            assert messages[-1]['content'] == 'Where from?'
+            return {"response": "What dates?", "trip_state": {**trip, "origin": "DFW"}}
+
+        monkeypatch.setattr(main.travel_graph, "serve_conversation", model)
+        monkeypatch.setattr(main, "conversation_turns", ConversationTurns())
+        conversation_id = str(uuid4())
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=main.app), base_url="http://test") as client:
+            first = asyncio.create_task(client.post('/agent/prompt', json=body('Plan New York', conversation_id)))
+            await asyncio.wait_for(entered.wait(), 2)
+            second = asyncio.create_task(client.post('/agent/prompt', json=body('Dallas', conversation_id)))
+            await asyncio.sleep(0)
+            finish.set()
+            results = await asyncio.wait_for(asyncio.gather(first, second), 5)
+            assert [result.status_code for result in results] == [200, 200]
+            assert results[1].json()['trip_state'] == {"destination": "JFK", "origin": "DFW"}
+            assert store.load(conversation_id)['revision'] == 2
+
+    asyncio.run(scenario())
 
 
 def test_multiturn_graph_clarification_correction_and_restart(store, monkeypatch):

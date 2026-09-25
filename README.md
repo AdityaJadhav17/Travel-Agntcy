@@ -225,6 +225,11 @@ SerpAPI contracts: [Flights](https://serpapi.com/google-flights-api),
 
 ## Maintenance and Kubernetes
 
+The Docker-based [CI pipeline](docs/ci.md) checks lint, types, dependency
+vulnerabilities, unit tests, Chromium/Firefox E2E journeys, persistence after an
+API restart, credentials, Helm charts, and production images. Its Python audit
+currently blocks on inherited dependency findings; see the CI guide for details.
+
 Run frontend maintenance in Docker without mixing Windows and Linux node_modules:
 
 ```sh
@@ -250,8 +255,11 @@ request UUID to `POST /agent/prompt`. API clients can use:
 
 The response retains `response` and `session_id` (a tracing ID) and adds
 `conversation_id` and `trip_state`. Reuse a request UUID only to retry the same
-message; the last 10 completed requests are cached. Conflicting concurrent writes
-return HTTP 409. Requests without a conversation ID remain stateless and compatible.
+message; the last 10 completed requests are cached. Within the local API process,
+turns for a chat are serialized, so overlapping retries share the completed result
+and distinct queued messages see the preceding turn. Other chats run concurrently.
+Cross-process conflicting writes return HTTP 409; distributed in-flight
+deduplication is not implemented. Requests without a conversation ID remain stateless and compatible.
 The streaming endpoint currently supports only the stateless path.
 
 Conversation messages and extracted trip details are stored in SQLite. Compose

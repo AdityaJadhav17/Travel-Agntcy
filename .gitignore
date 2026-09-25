@@ -10,6 +10,10 @@
 *.log
 frontend/dist/
 .runtime/
+frontend/test-results/
+frontend/playwright-report/
+.coverage*
+.ruff_cache/
 *.sqlite3
 *.sqlite3-*
 published_cids.json

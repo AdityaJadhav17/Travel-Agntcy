@@ -5,6 +5,8 @@ import json
 import urllib.error
 import urllib.request
 import sys
+import os
+from dotenv import dotenv_values
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -26,8 +28,6 @@ except urllib.error.HTTPError as exc:
     text = exc.read().decode()
     print('HTTP', exc.code)
 # Mask any configured credentials before showing diagnostics.
-from dotenv import dotenv_values
-import os
 for key, value in {**dotenv_values(), **os.environ}.items():
     if value and len(value) > 5 and any(part in key.upper() for part in ('KEY', 'TOKEN', 'SECRET', 'PASSWORD')):
         text = text.replace(value, '[REDACTED]')

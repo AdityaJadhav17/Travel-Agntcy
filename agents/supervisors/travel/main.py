@@ -31,7 +31,7 @@ from ioa_observe.sdk.tracing import session_start
 
 from agents.supervisors.travel.graph.graph import TravelGraph
 from agents.supervisors.travel.graph import shared
-from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict
+from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict, ConversationTurns
 from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED
 from config.logging_config import setup_logging
 from common.version import get_version_info
@@ -66,6 +66,7 @@ app.add_middleware(
 # Initialize the travel graph (LangGraph workflow)
 travel_graph = TravelGraph()
 conversation_store = ConversationStore()
+conversation_turns = ConversationTurns()
 
 
 class PromptRequest(BaseModel):
@@ -148,16 +149,17 @@ async def handle_prompt(request: PromptRequest):
                     raise HTTPException(422, "request_id is required for a conversation turn")
                 conversation_id = str(request.conversation_id)
                 request_id = str(request.request_id)
-                saved = await to_thread(conversation_store.load, conversation_id)
-                cached = saved["requests"].get(request_id)
-                if cached:
-                    if cached["prompt"] != request.prompt:
-                        raise HTTPException(409, "This request ID was already used for another message")
-                    return cached["result"]
-                turn = await travel_graph.serve_conversation(request.prompt, saved["messages"], saved["trip"])
-                result = {**turn, "conversation_id": conversation_id, "session_id": session_id["executionID"]}
-                await to_thread(conversation_store.save, conversation_id, saved, request_id, request.prompt, result)
-                return result
+                async with conversation_turns.acquire(conversation_id):
+                    saved = await to_thread(conversation_store.load, conversation_id)
+                    cached = saved["requests"].get(request_id)
+                    if cached:
+                        if cached["prompt"] != request.prompt:
+                            raise HTTPException(409, "This request ID was already used for another message")
+                        return cached["result"]
+                    turn = await travel_graph.serve_conversation(request.prompt, saved["messages"], saved["trip"])
+                    result = {**turn, "conversation_id": conversation_id, "session_id": session_id["executionID"]}
+                    await to_thread(conversation_store.save, conversation_id, saved, request_id, request.prompt, result)
+                    return result
             # Execute the travel graph and wait for completion
             result = await travel_graph.serve(request.prompt)
             logger.info(f"Travel search completed, session: {session_id['executionID']}")

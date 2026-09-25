@@ -1,14 +1,46 @@
 """Durable local conversation turns, with atomic optimistic concurrency checks."""
 
+import asyncio
 import json
 import os
 import sqlite3
-from contextlib import contextmanager
+from contextlib import asynccontextmanager, contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
 class ConversationConflict(Exception):
     pass
+
+
+@dataclass
+class _TurnQueue:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
+
+
+class ConversationTurns:
+    """Serialize turns per chat in one API event loop, including retry lookups.
+
+    Independent chats run concurrently. Entries include waiters and are removed
+    on completion/cancellation. SQLite revision checks still protect writes from
+    other processes; this is not a distributed lock or exactly-once execution.
+    """
+
+    def __init__(self):
+        self._active: dict[str, _TurnQueue] = {}
+
+    @asynccontextmanager
+    async def acquire(self, conversation_id: str):
+        entry = self._active.setdefault(conversation_id, _TurnQueue())
+        entry.users += 1
+        try:
+            async with entry.lock:
+                yield
+        finally:
+            entry.users -= 1
+            if not entry.users:
+                del self._active[conversation_id]
 
 
 class ConversationStore:

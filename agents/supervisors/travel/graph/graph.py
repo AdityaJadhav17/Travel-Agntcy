@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 
 from pydantic import BaseModel, Field
 from langchain_core.prompts import PromptTemplate
-from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
+from langchain_core.messages import AIMessage, SystemMessage
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.graph import MessagesState, StateGraph, END
 from ioa_observe.sdk.decorators import agent, graph
@@ -837,19 +837,19 @@ List any missing parameters in missing_params field."""
         # If user explicitly says "flight" without mentioning hotel/trip, it's flight-only
         if has_flight_keyword and not has_hotel_keyword and not has_trip_keyword:
             if params.search_type == "full_trip":
-                logger.info(f"Overriding search_type from 'full_trip' to 'flight_only' based on keyword detection")
+                logger.info("Overriding search_type from 'full_trip' to 'flight_only' based on keyword detection")
                 params.search_type = "flight_only"
         
         # If user explicitly mentions hotel without flight/trip keywords, it's hotel-only
         elif has_hotel_keyword and not has_flight_keyword and not has_trip_keyword:
             if params.search_type != "hotel_only":
-                logger.info(f"Overriding search_type to 'hotel_only' based on keyword detection")
+                logger.info("Overriding search_type to 'hotel_only' based on keyword detection")
                 params.search_type = "hotel_only"
         
         # If user explicitly asks about things to do/activities
         elif has_activity_keyword and not has_flight_keyword and not has_hotel_keyword:
             if params.search_type != "activity_only":
-                logger.info(f"Overriding search_type to 'activity_only' based on keyword detection")
+                logger.info("Overriding search_type to 'activity_only' based on keyword detection")
                 params.search_type = "activity_only"
         
         return params
@@ -964,7 +964,7 @@ Sorted by rating (best first):
             response += f"   {rating_str}"
             if location_str:
                 response += f" | {location_str}"
-            response += f"\n"
+            response += "\n"
             response += f"   🕐 Check-in: {check_in}\n"
             response += "\n"
 
@@ -1006,7 +1006,7 @@ Would you like me to also find flights to {location}?"""
             stops_text = "Non-stop" if stops == 0 else f"{stops} stop{'s' if stops > 1 else ''}"
             
             # Flight option header with price
-            response += f"---\n\n"
+            response += "---\n\n"
             response += f"**Option {i}** - ${price:.2f} ({price_label})\n\n"
             
             # Outbound Flight card
@@ -1114,7 +1114,7 @@ Would you like me to also find hotels at {params.destination_city or params.dest
         
         # Trip type label
         trip_type = "one-way" if is_one_way else "round-trip"
-        flight_price_label = f"(one-way)" if is_one_way else "(round-trip)"
+        flight_price_label = "(one-way)" if is_one_way else "(round-trip)"
 
         response = f"""🎉 **Great news! I found the best deal for your {trip_type} trip!**
 

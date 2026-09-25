@@ -147,12 +147,6 @@ def filter_valid_hotels(
         arrival_date = traveler_hotel_arrival.date()
         checkin_date = hotel_checkin_datetime.date()
         
-        # Calculate reasonable late-night cutoff (2 AM next day is still considered same-day arrival)
-        late_night_cutoff = datetime.combine(
-            arrival_date + timedelta(days=1), 
-            datetime.strptime("02:00", "%H:%M").time()
-        )
-        
         # Case 1: Traveler arrives on check-in date (same day)
         same_day_arrival = arrival_date == checkin_date
         
@@ -400,7 +394,7 @@ def find_cheapest_plan(
         arrival_datetime = extract_arrival_datetime(flight)
         
         if arrival_datetime is None:
-            logger.warning(f"Skipping flight with unparseable arrival time")
+            logger.warning("Skipping flight with unparseable arrival time")
             continue
         
         # STEP 3: Filter remaining hotels by timing constraints

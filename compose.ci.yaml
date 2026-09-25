@@ -1,0 +1,141 @@
+# Independent of the developer stack: no .env, host ports, real credentials or volumes.
+x-python: &python
+  image: travel-ci-python:local
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.ci
+
+x-env: &environment
+  TRACING_ENABLED: "false"
+  IDENTITY_AUTH_ENABLED: "false"
+  DEFAULT_MESSAGE_TRANSPORT: NATS
+  TRANSPORT_SERVER_ENDPOINT: nats://nats:4222
+  SERPAPI_BASE_URL: http://providers:9000/search
+  SERPAPI_API_KEY: ci-fixture-only
+  LLM_MODEL: ci-no-external-model
+  TRAVEL_CONVERSATION_DB: /data/conversations.sqlite3
+
+services:
+  python-checks:
+    <<: *python
+    environment: *environment
+    volumes:
+      - ./.runtime/ci:/reports
+    profiles: [checks]
+  frontend-checks:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.frontend-ci
+    volumes:
+      - ./.runtime/ci:/reports
+    profiles: [checks]
+  nats:
+    image: nats:2.11-alpine
+    command: ["--http_port", "8222"]
+    networks: [test]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8222/healthz"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  providers:
+    <<: *python
+    command: ["uv", "run", "--no-sync", "uvicorn", "tests.e2e.providers:app", "--host", "0.0.0.0", "--port", "9000"]
+    networks: [test]
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  flight-agent:
+    <<: *python
+    environment: *environment
+    command: ["uv", "run", "--no-sync", "python", "-m", "agents.flight.server"]
+    networks: [test]
+    depends_on:
+      nats: {condition: service_healthy}
+      providers: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/.well-known/agent.json')"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  hotel-agent:
+    <<: *python
+    environment: *environment
+    command: ["uv", "run", "--no-sync", "python", "-m", "agents.hotel.server"]
+    networks: [test]
+    depends_on:
+      nats: {condition: service_healthy}
+      providers: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9002/.well-known/agent.json')"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  activity-agent:
+    <<: *python
+    environment: *environment
+    command: ["uv", "run", "--no-sync", "python", "-m", "agents.activity.server"]
+    networks: [test]
+    depends_on:
+      nats: {condition: service_healthy}
+      providers: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9003/.well-known/agent.json')"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  api:
+    <<: *python
+    environment: *environment
+    command: ["uv", "run", "--no-sync", "uvicorn", "tests.e2e.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    networks: [test]
+    volumes:
+      - test-conversations:/data
+    depends_on:
+      flight-agent: {condition: service_healthy}
+      hotel-agent: {condition: service_healthy}
+      activity-agent: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.ui
+      args:
+        VITE_EXCHANGE_APP_API_URL: http://api:8000
+    networks: [test]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  e2e:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.e2e
+    init: true
+    shm_size: 1gb
+    environment:
+      CI: "true"
+      E2E_BASE_URL: http://localhost:3000
+      E2E_API_URL: http://api:8000
+    network_mode: service:ui
+    volumes:
+      - ./.runtime/ci/playwright:/app/test-results
+      - ./.runtime/ci/playwright-report:/app/playwright-report
+    profiles: [e2e]
+    depends_on:
+      ui: {condition: service_healthy}
+
+networks:
+  test:
+    internal: true
+volumes:
+  test-conversations:

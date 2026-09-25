@@ -459,9 +459,9 @@ async def find_best_travel_plan(
         
         if not plan:
             return (
-                f"Could not find a valid flight + hotel combination. "
-                f"This may happen if hotel check-in times don't align with flight arrivals. "
-                f"Try adjusting your dates."
+                "Could not find a valid flight + hotel combination. "
+                "This may happen if hotel check-in times don't align with flight arrivals. "
+                "Try adjusting your dates."
             )
         
         # Format the result

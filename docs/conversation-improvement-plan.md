@@ -109,10 +109,14 @@ Phase 1 is implemented for the local Docker app. The configured model is unchang
 The API preserves the existing stateless contract while the UI opts into durable
 conversation IDs and request IDs. SQLite stores completed turns and trip details;
 updates detect revision conflicts, and deletions leave an ID-only tombstone to
-prevent late saves from restoring deleted content. Concurrent identical in-flight
-requests may still duplicate provider work; deduplication covers completed requests.
+prevent late saves from restoring deleted content. The local API process now
+serializes turns per conversation, so concurrent identical retries reuse the saved
+response without repeating provider work. Other chats remain concurrent; queued
+turns see updated context. Queue entries are cleaned up on completion, failure,
+and cancellation. Cross-process in-flight deduplication remains future work.
 
-Verification: 29 credential-free backend tests pass in Docker. Frontend lint,
+Verification: 32 credential-free backend tests pass in Docker, including
+overlapping retries, ordered follow-ups, and cancellation cleanup. Frontend lint,
 formatting, typecheck and production build pass. A real-model three-turn smoke test
 confirmed New York -> Dallas -> correction to Boston while preserving departure.
 The browser completed “Plan a trip to New York” -> “Dallas” -> dates-only, with a
@@ -125,3 +129,8 @@ counts or budgets, provides full token streaming, or supports authenticated user
 Browser chat-switch verification also passed: a pending Tokyo reply completed
 in its own chat while the New York result remained unchanged. Reopening Tokyo
 asked for its origin, confirming that Dallas did not leak from the other chat.
+
+The [CI pipeline](ci.md) now protects this work with unit/API regressions and
+credential-free Chromium/Firefox journeys, including concurrent retries and a
+real process restart. The inherited Python dependency vulnerability backlog is a
+blocking check and must be remediated before the overall quality gate turns green.

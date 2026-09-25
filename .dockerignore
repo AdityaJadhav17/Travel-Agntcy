@@ -20,6 +20,10 @@
 **/*.pyo
 *.egg-info
 .pytest_cache
+.ruff_cache
+.coverage*
+**/test-results
+**/playwright-report
 
 # Ignore build outputs
 **/dist

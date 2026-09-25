@@ -174,6 +174,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           <div className="relative flex flex-col rounded-2xl border border-[#424242] bg-[#2f2f2f] shadow-lg transition-all focus-within:border-[#5a5a5a]">
             {/* Textarea */}
             <textarea
+              aria-label="Message Travel AGNTCY"
               ref={textareaRef}
               className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 py-3.5 pr-14 text-[15px] leading-6 text-gray-100 outline-none placeholder:text-gray-500"
               placeholder="Message Travel AGNTCY..."
@@ -187,6 +188,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             {/* Send button */}
             <div className="absolute bottom-2.5 right-3">
               <button
+                aria-label="Send message"
                 onClick={() => {
                   if (content.trim() && !isDisabled) {
                     processMessage()

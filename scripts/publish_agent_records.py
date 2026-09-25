@@ -16,7 +16,6 @@ import argparse
 import os
 import json
 import logging
-import sys
 from pathlib import Path
 from typing import Optional, Tuple, List
 
@@ -25,11 +24,10 @@ import grpc
 from google.protobuf.json_format import ParseDict, MessageToJson
 from google.protobuf.struct_pb2 import Struct
 
-logger = logging.getLogger(__name__)
-
 from a2a.types import AgentCard
 from scripts.travel_agent_cards import get_travel_agent_cards
 
+logger = logging.getLogger(__name__)
 SDK_IMPORT_ERROR = None
 
 # Optional SDKs are only required for publication, not --dry-run.

@@ -108,5 +108,5 @@ if __name__ == '__main__':
         asyncio.run(main(ENABLE_HTTP))
     except KeyboardInterrupt:
         print("\nShutting down gracefully on keyboard interrupt.")
-    except Exception as e:
+    except Exception:
         raise

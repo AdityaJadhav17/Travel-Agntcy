@@ -5,13 +5,12 @@ import logging
 import os
 
 from config.config import LLM_MODEL
-import litellm
 from langchain_litellm import ChatLiteLLM
 from langchain_openai import ChatOpenAI
 
-logger = logging.getLogger("lungo.common.llm")
 import common.chat_lite_llm_shim as chat_lite_llm_shim # our drop-in client
 
+logger = logging.getLogger("lungo.common.llm")
 def get_llm(streaming: bool = True):
   """
     Get the LLM provider based on the configuration using ChatLiteLLM
