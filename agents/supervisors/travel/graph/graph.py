@@ -32,6 +32,7 @@ from ioa_observe.sdk.decorators import agent, graph
 from agents.supervisors.travel.graph.tools import get_flights_via_a2a, get_hotels_via_a2a, get_activities_via_a2a
 from agents.travel.travel_logic import find_cheapest_plan
 from agents.supervisors.travel.graph.models import TravelSearchArgs
+from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
 from common.llm import get_llm
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
 
@@ -65,6 +66,7 @@ class GraphState(MessagesState):
     next_node: str
     full_response: str = ""
     search_params: dict = {}
+    budget_assessment: dict | None = None
 
 
 @agent(name="travel_agent")
@@ -260,6 +262,9 @@ Respond with ONLY 'travel_search' or 'general':""",
         trip = params.model_dump()
         if params.clarification_question:
             return {"messages": [AIMessage(content=params.clarification_question)], "search_params": trip}
+        budget_clarification = budget_question(params)
+        if budget_clarification:
+            return {"messages": [AIMessage(content=budget_clarification)], "search_params": trip}
         date_error = self._validate_dates(params) if params.search_type != "activity_only" else None
         if date_error:
             return {"messages": [AIMessage(content=date_error)], "search_params": trip}
@@ -274,6 +279,12 @@ Respond with ONLY 'travel_search' or 'general':""",
         }
         result = await handlers[params.search_type](params)
         return {**result, "search_params": trip}
+
+    @staticmethod
+    def _quoted_response(response, summary=None):
+        if summary:
+            response = summary["message"] + "\n\n" + response
+        return {"messages": [AIMessage(content=response)], "full_response": response, "budget_assessment": summary}
 
     @staticmethod
     def _missing_details(params: TravelSearchArgs) -> str | None:
@@ -358,12 +369,17 @@ Respond with ONLY 'travel_search' or 'general':""",
         
         try:
             hotels = await get_hotels_via_a2a(location, params.start_date, params.end_date)
+            summary = None
+            if params.budget_amount is not None:
+                hotels, summary = filter_quotes(hotels, "hotel", params)
+                if not hotels:
+                    return self._quoted_response("Try different dates or revise your quoted-cost budget.", summary)
             
             if not hotels:
                 return {"messages": [AIMessage(content=f"I couldn't find any hotels in {location} for those dates. Please try different dates or another location.")]}
             
             response = self._format_hotels_only(hotels, location, params)
-            return {"messages": [AIMessage(content=response)], "full_response": response}
+            return self._quoted_response(response, summary)
             
         except Exception as e:
             logger.error(f"Error searching hotels: {e}")
@@ -405,11 +421,16 @@ Respond with ONLY 'travel_search' or 'general':""",
                 is_one_way=params.is_one_way,
             )
             
+            summary = None
+            if params.budget_amount is not None:
+                flights, summary = filter_quotes(flights, "flight", params)
+                if not flights:
+                    return self._quoted_response("Try different dates or revise your quoted-cost budget.", summary)
             if not flights:
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination} for {params.start_date}. Please try different dates.")]}
             
             response = self._format_flights_only(flights, params)
-            return {"messages": [AIMessage(content=response)], "full_response": response}
+            return self._quoted_response(response, summary)
             
         except Exception as e:
             logger.error(f"Error searching flights: {e}")
@@ -467,6 +488,12 @@ Respond with ONLY 'travel_search' or 'general':""",
             if not hotels:
                 return {"messages": [AIMessage(content=f"I found flights but couldn't find hotels in {hotel_location}.")]}
 
+            if params.budget_amount is not None:
+                flights = [f for f in flights if quote_total(f, "flight", params) is not None]
+                hotels = [{**h, "total_price": float(total)} for h in hotels if (total := quote_total(h, "hotel", params)) is not None]
+                if not flights or not hotels:
+                    return self._quoted_response("Try different dates to find complete prices.", assessment(params, None))
+
             # Find cheapest valid plan
             plan = find_cheapest_plan(flights, hotels)
             
@@ -477,6 +504,13 @@ Respond with ONLY 'travel_search' or 'general':""",
                     f"Try an earlier departure or later check-in time."
                 )]}
 
+            summary = None
+            if params.budget_amount is not None:
+                total = quote_total(plan["flight"], "flight", params) + quote_total(plan["hotel"], "hotel", params)
+                summary = assessment(params, total)
+                if summary["status"] == "over":
+                    return self._quoted_response("Try different dates or raise your quoted-cost budget. I have not selected an over-budget trip.", summary)
+
             # Search for activities (optional)
             activities = []
             try:
@@ -486,7 +520,7 @@ Respond with ONLY 'travel_search' or 'general':""",
 
             # Format and return
             response = self._format_travel_plan(plan, params, activities, hotel_checkout_date)
-            return {"messages": [AIMessage(content=response)], "full_response": response}
+            return self._quoted_response(response, summary)
             
         except Exception as e:
             logger.error(f"Error during full trip search: {e}")
@@ -526,7 +560,17 @@ For ambiguous dates/locations, leave the uncertain field empty and put a short s
 question in clarification_question. Missing details alone are not ambiguity: leave
 clarification_question empty and let the app ask for missing fields. Clear
 clarification_question once the ambiguity has been resolved.
-Do not claim that budget/passenger preferences are enforced by this schema.
+Extract budget_amount, budget_currency and budget_scope; preserve them on follow-ups.
+When a user removes the budget, set all three budget fields to null.
+Budget currency must be explicit or established by previous USD quotes; a bare dollar
+symbol without that context is ambiguous (ask which currency). Never invent FX rates.
+Use quoted_total for a limit on the flight fare and/or full hotel stay in this search.
+Use per_night for nightly limits, per_person for per-traveler limits and all_in for
+limits including meals/activities/transfers; the app will explain unsupported scopes.
+Leave budget_scope null when unclear. If switching search types with a saved budget,
+ask whether the limit should now apply to the new search before applying it.
+If the assistant asked to confirm quoted-cost scope, a positive answer sets quoted_total.
+Do not claim passenger counts, rooms or unpriced preferences are enforced.
 
 
 Today's date: {datetime.now().date().isoformat()}
@@ -1090,12 +1134,8 @@ Would you like me to also find hotels at {params.destination_city or params.dest
         # For round-trip, use end_date
         try:
             start_dt = datetime.strptime(params.start_date.strip()[:10], "%Y-%m-%d")
-            if is_one_way:
-                # One-way: 1 night stay
-                nights = 1
-            else:
-                end_dt = datetime.strptime(params.end_date.strip()[:10], "%Y-%m-%d")
-                nights = max(1, (end_dt - start_dt).days)
+            end_dt = datetime.strptime((hotel_checkout_date or params.end_date).strip()[:10], "%Y-%m-%d")
+            nights = max(1, (end_dt - start_dt).days)
         except (ValueError, TypeError, AttributeError):
             nights = 1  # Default to 1 night if date parsing fails
 
@@ -1116,7 +1156,7 @@ Would you like me to also find hotels at {params.destination_city or params.dest
         trip_type = "one-way" if is_one_way else "round-trip"
         flight_price_label = "(one-way)" if is_one_way else "(round-trip)"
 
-        response = f"""🎉 **Great news! I found the best deal for your {trip_type} trip!**
+        response = f"""🎉 **I found the lowest eligible quote among the returned options for your {trip_type} trip.**
 
 **💰 Total Cost: ${total_price:.2f}**
 - ✈️ Flight: ${flight_price:.2f} {flight_price_label}
@@ -1312,7 +1352,7 @@ How can I help you plan your next adventure?"""
         })
         for message in reversed(result.get("messages", [])):
             if isinstance(message, AIMessage) and message.content.strip():
-                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip)}
+                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip), "budget_assessment": result.get("budget_assessment")}
         raise RuntimeError("No valid response generated")
 
     async def serve(self, prompt: str) -> str:

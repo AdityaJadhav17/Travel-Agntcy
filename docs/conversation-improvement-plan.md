@@ -123,8 +123,17 @@ The browser completed “Plan a trip to New York” -> “Dallas” -> dates-onl
 container rebuild/recreation between the second and third turns. It returned DFW/JFK
 round-trip flights, a three-night hotel, and activities. Browser console was clean.
 
-Phases 2–4 remain planned. No claim is made that this slice enforces passenger
-counts or budgets, provides full token streaming, or supports authenticated users.
+Phase 2 has started with US6: USD budgets for quoted flight fares and full hotel
+stays persist across follow-ups, corrections and reloads. The app computes totals,
+filters affordable flight/hotel lists and declines over-budget trip selections.
+The response includes a structured budget assessment, also retained in browser
+history. Unknown prices/currencies do not become affordable zero-cost results.
+Ambiguous, non-USD, nightly, per-person and all-in budgets prompt clarification.
+Activities, meals, transfers and unquoted fees are explicitly excluded; quotes use
+the provider's default passenger/room selection. Removing the budget clears it.
+
+US7–US9 and phases 3–4 remain planned. This slice does not enforce passenger or
+room counts, provide token streaming, or support authenticated users.
 
 Browser chat-switch verification also passed: a pending Tokyo reply completed
 in its own chat while the New York result remained unchanged. Reopening Tokyo
@@ -134,3 +143,13 @@ The [CI pipeline](ci.md) now protects this work with unit/API regressions and
 credential-free Chromium/Firefox journeys, including concurrent retries and a
 real process restart. The inherited Python dependency vulnerability backlog is a
 blocking check and must be remediated before the overall quality gate turns green.
+
+Budget verification: 57 backend tests and 12 Chromium/Firefox E2E tests pass.
+Combined branch-inclusive coverage of conversation storage/coordinating and
+budget decisions is 98.68%. Frontend lint, formatting, types and build pass.
+The budget work also fixes one-way trips showing a one-night label for a
+multi-night hotel stay. The dependency audit blocker remains unchanged.
+
+The configured live model also passed the four-turn budget smoke test: USD 500
+survived the origin clarification, changed to USD 600 alongside a destination
+correction, and cleared when requested. No priced provider search was needed.

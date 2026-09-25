@@ -278,6 +278,20 @@ This is a local single-user implementation. Kubernetes defaults do not yet mount
 persistent conversation storage; use Compose for durable memory in this phase.
 
 See [the improvement plan](docs/conversation-improvement-plan.md) for personas,
-user stories, acceptance criteria, and subsequent phases. Budget/passenger-count
-enforcement, grounded result explanations, structured cards, and conversational
-streaming are still planned; remembering a message does not enforce its constraints.
+user stories, acceptance criteria, and subsequent phases. USD quoted-cost budgets
+now persist across follow-ups and filter priced results. For example: "Plan a trip
+to New York; budget USD 600 total for flight and hotel", then supply your origin
+and dates. You can revise or remove the budget later.
+
+The comparison covers the provider's default passenger/room selection and the
+flight fare and/or full hotel stay for the current search. Activities, meals,
+transfers and unquoted fees are excluded. Nightly, per-person, all-in and non-USD
+budgets trigger clarification; no exchange rates are invented. The UI shows a
+structured budget assessment, retained after reloading a chat. Incomplete or
+non-USD quotes cannot count as affordable. Results remain search quotes, not
+booking guarantees.
+
+Passenger/room selection, retained-result explanations, fully structured result
+cards, and conversational streaming remain planned. The opt-in live-model check
+`python scripts/conversation_smoke_test.py --budget` tests budget follow-ups
+without making a priced provider search.

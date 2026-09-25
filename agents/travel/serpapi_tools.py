@@ -369,6 +369,7 @@ def _parse_flight(flight_group: dict) -> Optional[dict]:
         return {
             "price": price,
             "departure_token": flight_group.get("departure_token"),
+            "currency": "USD",  # All flight requests explicitly ask SerpAPI for USD.
             # Outbound flight details
             "departure_time": departure_time,
             "departure_code": departure_code,
@@ -541,6 +542,7 @@ def _parse_hotel(property_data: dict, check_in_date: str, check_out_date: str = 
             "nights": nights,
             "check_out_date": check_out_date,
             "rating": overall_rating,  # Overall rating (for backward compatibility)
+            "currency": "USD",  # All hotel requests explicitly ask SerpAPI for USD.
             "overall_rating": overall_rating,  # Explicit overall rating
             "location_rating": location_rating,  # Location-specific rating
             "hotel_class": hotel_class,  # Star rating (e.g., 3, 4, 5 stars)

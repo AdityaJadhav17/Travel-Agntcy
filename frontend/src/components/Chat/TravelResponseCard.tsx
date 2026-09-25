@@ -10,6 +10,7 @@
  **/
 
 import React from "react"
+import { BudgetAssessment } from "@/types/budget"
 import {
   Plane,
   Hotel,
@@ -22,6 +23,7 @@ import {
 
 interface TravelResponseCardProps {
   content: string
+  budget?: BudgetAssessment | null
 }
 
 // Detect response type based on content patterns
@@ -103,7 +105,11 @@ const parseFullTripResponse = (content: string) => {
     if (!trimmed || trimmed === "---") continue
 
     // Detect sections
-    if (trimmed.includes("Great news") || trimmed.includes("found the best")) {
+    if (
+      trimmed.includes("Great news") ||
+      trimmed.includes("found the best") ||
+      trimmed.includes("lowest eligible quote among")
+    ) {
       sections.intro = trimmed.replace(/\*\*/g, "").replace(/🎉/g, "").trim()
       continue
     }
@@ -1176,4 +1182,35 @@ const SimpleMarkdown: React.FC<{ content: string }> = ({ content }) => {
   )
 }
 
-export default TravelResponseCard
+const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
+  content,
+  budget,
+}) => {
+  const prefix = budget ? `${budget.message}\n\n` : ""
+  const body =
+    prefix && content.startsWith(prefix)
+      ? content.slice(prefix.length)
+      : content
+  return (
+    <>
+      {budget && (
+        <section
+          aria-label="Budget assessment"
+          className={`mb-4 rounded-xl border p-4 text-sm ${budget.status === "within" ? "border-emerald-700 bg-emerald-950/30 text-emerald-100" : "border-amber-700 bg-amber-950/30 text-amber-100"}`}
+        >
+          <h3 className="mb-1 font-semibold">
+            {budget.status === "within"
+              ? "Within quoted-cost budget"
+              : budget.status === "over"
+                ? "Over budget"
+                : "Budget not verified"}
+          </h3>
+          <p>{budget.message}</p>
+        </section>
+      )}
+      <TravelResponseCard content={body} />
+    </>
+  )
+}
+
+export default TravelResponseWithBudget

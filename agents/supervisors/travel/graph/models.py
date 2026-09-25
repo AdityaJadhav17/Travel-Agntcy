@@ -45,6 +45,9 @@ class TravelSearchArgs(BaseModel):
         Hotel only: "Find hotels in Paris for March 1-5"
         Activity only: "What things to do in San Francisco?"
     """
+    budget_amount: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False, description="Positive budget limit; preserve across follow-ups, null when explicitly removed")
+    budget_currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$", description="Explicit ISO currency code, e.g. USD; null if ambiguous")
+    budget_scope: Optional[Literal["quoted_total", "per_night", "per_person", "all_in"]] = Field(default=None, description="quoted_total means the current search's flight fare and/or full hotel stay; do not assume scope when unclear")
     clarification_question: str = Field(default="", description="A short question for ambiguous input; empty when unambiguous")
     search_type: Literal["full_trip", "flight_only", "hotel_only", "activity_only"] = Field(
         default="full_trip",

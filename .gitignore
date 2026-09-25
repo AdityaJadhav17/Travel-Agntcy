@@ -13,6 +13,7 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 .coverage*
+!.coveragerc
 .ruff_cache/
 *.sqlite3
 *.sqlite3-*

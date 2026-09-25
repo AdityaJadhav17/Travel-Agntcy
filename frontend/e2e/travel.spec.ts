@@ -147,6 +147,50 @@ test("invalid requests are rejected and completed retries return the same turn",
   }
 })
 
+test("budget survives corrections and reload, can be revised and removed", async ({
+  page,
+}) => {
+  await page.goto("/")
+  await send(page, "Plan New York. Budget USD 500")
+  await send(page, "Dallas.")
+  const over = await send(page, `${start} to ${end}`)
+  expect(over.budget_assessment).toMatchObject({
+    status: "over",
+    limit: 500,
+    quoted_total: 540,
+  })
+  await expect(
+    page.getByRole("region", { name: "Budget assessment" }).last(),
+  ).toContainText("USD 40.00 over")
+  await page.reload()
+  await page
+    .getByRole("button", { name: "Plan New York. Budget USD 500", exact: true })
+    .click()
+  await expect(
+    page.getByRole("region", { name: "Budget assessment" }).last(),
+  ).toContainText("USD 40.00 over")
+  const changed = await send(page, "Actually Boston. Budget USD 600")
+  expect(changed.trip_state).toMatchObject({
+    origin: "DFW",
+    destination: "BOS",
+    budget_amount: 600,
+  })
+  expect(changed.budget_assessment.status).toBe("within")
+  await expect(
+    page.getByRole("region", { name: "Budget assessment" }).last(),
+  ).toContainText("USD 60.00 remaining")
+  await expect(page.getByText(/Fixture Central Hotel/).last()).toBeVisible()
+  const foreign = await send(page, "Budget EUR 600")
+  expect(foreign.budget_assessment).toBeNull()
+  await expect(page.getByText(/cannot convert your EUR budget/)).toBeVisible()
+  const cleared = await send(page, "Remove budget")
+  expect(cleared.trip_state.budget_amount).toBeNull()
+  expect(cleared.budget_assessment).toBeNull()
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  const separate = await send(page, "Plan Tokyo.")
+  expect(separate.trip_state.budget_amount).toBeNull()
+})
+
 test("past dates and unavailable providers give actionable replies", async ({
   page,
 }) => {

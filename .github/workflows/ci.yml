@@ -59,7 +59,7 @@ jobs:
           docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks
           uv run --no-sync pytest tests/travel -q
           --junitxml=/reports/pytest.xml
-          --cov=agents.supervisors.travel.conversations --cov-branch --cov-fail-under=90
+          --cov --cov-config=.coveragerc --cov-branch --cov-fail-under=90
           --cov-report=term-missing --cov-report=xml:/reports/coverage.xml
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         if: always()

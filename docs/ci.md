@@ -10,7 +10,7 @@ does not itself change repository branch protection.
 | Check | Scope |
 | --- | --- |
 | Frontend | ESLint without fixes, Prettier, TypeScript (including E2E sources), Vite production build, npm audit including development dependencies |
-| Python | Ruff on application/configuration/scripts and current travel tests; unit/API regressions; JUnit and coverage XML; 90% branch-inclusive coverage floor on the conversation repository/turn coordinator |
+| Python | Ruff on application/configuration/scripts and current travel tests; unit/API regressions; JUnit and coverage XML; 90% branch-inclusive coverage floor on the conversation repository/turn coordinator and budget decisions |
 | Python audit | `uv export --locked --group ci` and pip-audit on the resolved runtime and CI dependencies; any reported advisory blocks |
 | E2E | Chromium and Firefox against nginx, FastAPI, SQLite, three agent services and NATS; separate API restart-persistence probe |
 | Infrastructure | actionlint, redacted Gitleaks source scan, tracked-file hygiene, strict Helm lint, builds of all five production images |
@@ -42,7 +42,7 @@ Keep `scripts/conversation_smoke_test.py` as an opt-in real-provider check.
 
 Journeys cover clarification across turns, destination correction, reload,
 separate chats, late responses, deletion, invalid dates/IDs, provider failures,
-and both overlapping and completed retries. Dates are generated in the future.
+budget retention/revision/removal, and both overlapping and completed retries. Dates are generated in the future.
 No test uses a real user's conversation or the developer's conversation volume.
 
 ## Run locally with Docker
@@ -53,7 +53,7 @@ From the repository root (Docker Compose v2 required):
 docker compose -p travel-ci -f compose.ci.yaml build python-checks frontend-checks ui e2e
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync ruff check agents common config services scripts tests/travel tests/e2e
-docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync pytest tests/travel -q --junitxml=/reports/pytest.xml --cov=agents.supervisors.travel.conversations --cov-branch --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:/reports/coverage.xml
+docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync pytest tests/travel -q --junitxml=/reports/pytest.xml --cov --cov-config=.coveragerc --cov-branch --cov-fail-under=90 --cov-report=term-missing --cov-report=xml:/reports/coverage.xml
 docker compose -p travel-ci -f compose.ci.yaml up -d --no-build --wait --wait-timeout 180 ui
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps e2e
 docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/check_persistence.py seed

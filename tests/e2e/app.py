@@ -38,6 +38,13 @@ async def extract(context):
         params["end_date"] = dates[1]
     if "hotels only" in prompt:
         params["search_type"] = "hotel_only"
+    if "flights only" in prompt:
+        params["search_type"] = "flight_only"
+    budget = re.search(r"budget (usd|eur) ([\d.]+)", prompt)
+    if budget:
+        params.update(budget_currency=budget[1].upper(), budget_amount=float(budget[2]), budget_scope="quoted_total")
+    if "remove budget" in prompt:
+        params.update(budget_currency=None, budget_amount=None, budget_scope=None)
     if "failure" in prompt:
         params.update(search_type="hotel_only", location="Failure City")
     params["clarification_question"] = ""

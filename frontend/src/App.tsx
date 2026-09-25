@@ -22,6 +22,7 @@ import { Message } from "./types/message"
 import { getGraphConfig } from "@/utils/graphConfigs"
 import { PATTERNS, PatternType } from "@/utils/patternUtils"
 import TravelResponseCard from "@/components/Chat/TravelResponseCard"
+import { BudgetAssessment } from "@/types/budget"
 import { Plane } from "lucide-react"
 
 interface ApiResponse {
@@ -29,6 +30,13 @@ interface ApiResponse {
   session_id?: string
   conversation_id?: string
   trip_state?: Record<string, unknown>
+  budget_assessment?: BudgetAssessment | null
+}
+
+interface ConversationMessage {
+  role: "user" | "assistant"
+  content: string
+  budget_assessment?: BudgetAssessment | null
 }
 
 export interface ChatHistoryItem {
@@ -36,10 +44,7 @@ export interface ChatHistoryItem {
   conversationId?: string
   title: string
   timestamp: Date
-  messages: Array<{
-    role: "user" | "assistant"
-    content: string
-  }>
+  messages: ConversationMessage[]
 }
 
 const CHAT_HISTORY_KEY = "travel_chat_history"
@@ -82,7 +87,7 @@ const App: React.FC = () => {
     }
   })
   const [conversationMessages, setConversationMessages] = useState<
-    Array<{ role: "user" | "assistant"; content: string }>
+    ConversationMessage[]
   >([])
 
   // Ref for scrolling to bottom
@@ -199,7 +204,11 @@ const App: React.FC = () => {
     if (deletedChats.current.has(chatId)) return
     const updatedMessages = [
       ...newMessages,
-      { role: "assistant" as const, content: response.response },
+      {
+        role: "assistant" as const,
+        content: response.response,
+        budget_assessment: response.budget_assessment,
+      },
     ]
     setChatHistory((previous) =>
       previous.map((chat) =>
@@ -421,7 +430,10 @@ const App: React.FC = () => {
                             <Plane className="h-4 w-4 text-white" />
                           </div>
                           <div className="flex-1 pt-1 text-[15px]">
-                            <TravelResponseCard content={msg.content} />
+                            <TravelResponseCard
+                              content={msg.content}
+                              budget={msg.budget_assessment}
+                            />
                           </div>
                         </div>
                       )}

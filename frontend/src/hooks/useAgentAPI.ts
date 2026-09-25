@@ -7,6 +7,7 @@ import React, { useRef, useState, useEffect } from "react"
 import axios from "axios"
 import { v4 as uuid } from "uuid"
 import { Message } from "@/types/message"
+import { BudgetAssessment } from "@/types/budget"
 import { isLocalDev, parseApiError, Role } from "@/utils/const"
 import { withRetry, RETRY_CONFIG } from "@/utils/retryUtils"
 import { shouldEnableRetries, getApiUrlForPattern } from "@/utils/patternUtils"
@@ -16,6 +17,7 @@ interface ApiResponse {
   session_id?: string
   conversation_id?: string
   trip_state?: Record<string, unknown>
+  budget_assessment?: BudgetAssessment | null
 }
 
 interface UseAgentAPIReturn {
