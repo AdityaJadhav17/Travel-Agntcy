@@ -20,7 +20,10 @@ permissions, explicit timeouts, and no application secrets. Superseded PR runs
 are cancelled. Reports, traces, screenshots, videos on failure, and CI service
 logs are retained for 14 days. Dependabot checks Actions, npm, uv and Docker
 weekly. No audit job is configured to continue on error. Python audit exceptions
-are recorded in `scripts/ci/audit_exceptions.json` (currently empty). Each requires
+are recorded in `scripts/ci/audit_exceptions.json`. The maintainer approved one
+exception on September 25, 2026: `nltk==3.10.3` / `PYSEC-2026-3740`, expiring
+October 9, 2026 at 00:00 UTC. This accepts the finding temporarily; it does not
+patch NLTK or change application functionality. Each exception requires
 an exact package, version and advisory ID, a reason, and an approval/expiry window
 of at most 14 days. They fail at 00:00 UTC on the expiry date and stop applying
 as soon as the scanner reports a fixed version. Findings remain in the raw JSON;
@@ -107,8 +110,10 @@ volume cleanup against the normal developer Compose project.
 On 2026-09-24, npm audit reported zero vulnerabilities. The Python runtime and CI
 audit initially reported **403 advisories across 42 packages**. Dependency updates
 and removal of unused adapters reduced the same audit to **1 advisory in NLTK
-3.10.3**, with no published fix. The gate continues to fail on that finding;
-no exception or weaker threshold has been added. See the
+3.10.3**, with no published fix. The maintainer approved the exact, expiring
+exception above; all other findings still block. The raw audit retains the
+finding, and CI reports `passed_with_exception` while the exception is valid.
+See the
 [remediation notes](dependency-remediation.md) for the dependency path,
 application reachability assessment, and verification results. Counts reflect
 scanner reports, not an assessment that every advisory is exploitable in this app.

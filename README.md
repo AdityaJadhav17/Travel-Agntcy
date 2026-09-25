@@ -228,7 +228,8 @@ SerpAPI contracts: [Flights](https://serpapi.com/google-flights-api),
 The Docker-based [CI pipeline](docs/ci.md) checks lint, types, dependency
 vulnerabilities, unit tests, Chromium/Firefox E2E journeys, persistence after an
 API restart, credentials, Helm charts, and production images. Its Python audit
-currently blocks on one unfixed upstream NLTK advisory; see the
+retains one unfixed upstream NLTK advisory under an approved exception expiring
+October 9, 2026 (UTC); see the
 [dependency remediation notes](docs/dependency-remediation.md) for details.
 
 Run frontend maintenance in Docker without mixing Windows and Linux node_modules:

@@ -20,11 +20,11 @@
   schema revision `8b2bf93bf8dc`. Its old generated dependency constrained protobuf
   below 6.33; protobuf is now 6.33.6, with a patched minimum of 6.33.5.
 
-The identical blocking audit command now reports **1 finding in 1 package**, down
-from 403 findings across 42 packages. No finding is suppressed; no audit threshold
-or quality-gate requirement has been relaxed.
+The full pip-audit scan reports **1 finding in 1 package**, down from 403 findings
+across 42 packages. Its raw report retains that finding. On September 25, 2026,
+the maintainer approved the narrow, expiring CI exception described below.
 
-## Remaining upstream blocker
+## Remaining upstream vulnerability and approved exception
 
 `nltk==3.10.3`: **CVE-2026-81726 / GHSA-8mgp-746c-j5xp / PYSEC-2026-3740**.
 The [upstream advisory](https://github.com/nltk/nltk/security/advisories/GHSA-8mgp-746c-j5xp)
@@ -42,20 +42,23 @@ file upload/loading/training endpoints, or pass user-supplied filesystem paths t
 NLTK. Its tools are fixed HTTP travel searches. This is a reachability assessment
 of the present application, not a claim that the installed dependency is patched.
 
-The default remains **audit failure**. A policy alternative, requiring an explicit
-decision, is a 14-day exception for this advisory and `nltk==3.10.3` only, with the
-finding retained in the report and automatic failure after expiry. No exception
-has been added. An upstream fixed release or a separately reviewed replacement
-of the tracing SDK's mandatory LlamaIndex dependency would remove the blocker.
+The maintainer explicitly approved an exception on **2026-09-25** for
+`PYSEC-2026-3740` in `nltk==3.10.3` only. It expires on **2026-10-09 at 00:00 UTC**,
+with no automatic renewal. This changes the CI acceptance policy only; it does
+not patch the vulnerable dependency or change application functionality.
+An upstream fixed release or a separately reviewed replacement of the tracing
+SDK's mandatory LlamaIndex dependency is still needed to remove the vulnerability.
 
 The follow-up `scripts/ci/audit_policy.py` implements that bounded policy and is
-wired into CI, with an **empty exception list** pending a maintainer decision.
+wired into CI, with the single approved entry in `scripts/ci/audit_exceptions.json`.
 It retains the complete scanner report, emits a separate policy decision artifact,
 and validates that every applicable exported dependency was actually scanned.
 Its 29 regression cases cover expiry, additional advisories, changed versions,
-published fixes, malformed/incomplete reports, and scanner failure. The proposed
-NLTK-only exception would expire on **2026-10-09 at 00:00 UTC**; it has not been
-enabled. The real scan with the empty policy still exits 1 on the NLTK advisory.
+published fixes, malformed/incomplete reports, and scanner failure. The gate
+fails again at expiry or as soon as pip-audit reports a patched version. It also
+rejects any other advisory or package version. The original scan with an empty
+policy exited 1 on the NLTK advisory; the approved policy permits this finding
+with a visible warning and a `passed_with_exception` decision.
 The complete backend suite now passes 86 tests with 98.68% targeted coverage;
 Ruff and actionlint also pass. Application dependencies and runtime behavior
 are unchanged by this follow-up.
@@ -74,7 +77,14 @@ Verified locally in Docker after the dependency updates:
 - The live-model smoke test passed clarification, destination correction, and
   budget retention, revision and removal. It used and deleted a temporary
   conversation, without making a priced travel-provider search.
-- The strict Python audit still exits 1 for the single NLTK finding above.
+- The raw pip-audit scan still exits 1 for the NLTK finding. The CI policy runner
+  accepts only the approved exception while it remains valid; its raw JSON report
+  is unchanged and its policy decision is uploaded separately.
+
+After enabling the approved exception on September 25, the fresh Docker build,
+locked dependency export, and full audit completed successfully. The policy
+runner exited 0 with `passed_with_exception`, exactly one accepted finding and
+zero blocked findings. All 29 audit-policy regression tests passed again.
 
 JUnit, coverage, browser artifacts, the audit JSON and CI service logs are under
 `.runtime/ci/`. The isolated CI stack and test volume were cleaned up; the
