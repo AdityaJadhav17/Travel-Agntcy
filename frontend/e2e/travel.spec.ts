@@ -18,6 +18,33 @@ async function send(page: Page, prompt: string) {
   return result.json()
 }
 
+test("explains a retained trip after reload and does not leak it to a new chat", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const prompt = "Plan Dallas to New York"
+  await send(page, prompt)
+  const found = await send(page, `${start} to ${end}`)
+  expect(found.recommendation.version).toBe(1)
+  await page.reload()
+  await page.getByRole("button", { name: prompt, exact: true }).click()
+  const explained = await send(page, "Why this one?")
+  expect(explained.recommendation).toEqual(found.recommendation)
+  await expect(page.getByText("Why this trip?", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText(/prices and availability have not been refreshed/),
+  ).toBeVisible()
+  await expect(
+    page.getByText(/USD 240.00 flight fare \+ USD 300.00 full hotel stay/),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  const empty = await send(page, "Why this trip?")
+  expect(empty.recommendation).toBeNull()
+  await expect(
+    page.getByText(/don't have a saved full-trip recommendation/),
+  ).toBeVisible()
+})
+
 test("clarifies, searches real agents, reloads and corrects the destination", async ({
   page,
 }) => {

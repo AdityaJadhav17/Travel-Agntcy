@@ -135,8 +135,9 @@ the requested traveler selection in one hotel room (US7 below). Removing the bud
 US7 is implemented for supported single-room searches, with explicit clarification
 for multi-room requests and infant flight seating. Adults, children, ages at travel,
 and requested rooms persist in conversation state. Provider adapters receive
-validated counts, and quote metadata must match the requested party. US8–US9 and
-phases 3–4 remain planned. See [traveler support](traveler-support.md) for boundaries.
+validated counts, and quote metadata must match the requested party. US8 and
+phases 3–4 remain planned. US9 now has the full-trip explanation slice described
+below. See [traveler support](traveler-support.md) for boundaries.
 
 US7 validation: 109 backend tests, 14 Chromium/Firefox journeys, the family
 process-restart probe, and the configured live-model family smoke test pass.
@@ -162,3 +163,37 @@ multi-night hotel stay. These budget-slice counts predate the traveler regressio
 The configured live model also passed the four-turn budget smoke test: USD 500
 survived the origin clarification, changed to USD 600 alongside a destination
 correction, and cleared when requested. No priced provider search was needed.
+
+### Retained recommendations and explanations (US9, full-trip slice)
+
+After a successful flight + hotel recommendation, the API stores a versioned,
+bounded snapshot of the selected quote facts, stable quote IDs, UTC search time,
+trip constraints and actual selection criteria. Facts are saved atomically with
+the conversation and removed on deletion. Existing conversation databases gain
+an additive table without changing or discarding their previous messages.
+
+Travelers can ask “Why this one?” or “Why this trip?” to see the retained airline,
+hotel, full-stay price calculation, budget result, timing criteria and any relaxed
+rating thresholds. The answer is generated from facts in code; it does not rerun
+extraction or provider searches. Other explanation phrasings use the existing
+intent model before reaching the same deterministic answer. The response labels
+prices as historical and does not imply refreshed availability.
+
+New searches and clarification turns invalidate the prior selection, preventing
+an old destination or party from being explained as a newly requested trip.
+Greetings and repeated explanations retain it. Chats created before this feature
+need one successful full-trip search to acquire a snapshot. Single-category search
+lists do not yet retain selections for explanation.
+
+This slice establishes retained facts before US8. Selective hotel replacement,
+retaining an executable flight itinerary and refreshing stale provider quotes are
+still unimplemented; explanation never silently substitutes a new selection.
+
+Docker verification: 124 backend tests pass, with 98.97% branch-inclusive coverage
+across the gated modules, including 100% for recommendation facts/explanations.
+All 16 Chromium/Firefox browser tests pass, as do Ruff, frontend lint, formatting,
+typecheck, frontend build and the production supervisor build. Deterministic tests
+cover model routing boundaries; these results do not measure live-model accuracy.
+The real CI API process-restart probe also passed for both family trip state and
+the exact retained recommendation. The local Docker app was recreated with the
+updated supervisor and all services reported healthy. Changes remain uncommitted.

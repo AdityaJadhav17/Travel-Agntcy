@@ -19,3 +19,5 @@ frontend/playwright-report/
 *.sqlite3-*
 published_cids.json
 oasf_records/*_Search_Agent.json
+
+.codex/skills/

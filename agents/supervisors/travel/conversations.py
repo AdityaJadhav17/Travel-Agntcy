@@ -56,6 +56,7 @@ class ConversationStore:
             messages TEXT NOT NULL, trip TEXT NOT NULL, requests TEXT NOT NULL
         )""")
         db.execute("CREATE TABLE IF NOT EXISTS deleted_conversations (id TEXT PRIMARY KEY)")
+        db.execute("CREATE TABLE IF NOT EXISTS conversation_recommendations (id TEXT PRIMARY KEY, facts TEXT NOT NULL)")
         try:
             with db:
                 yield db
@@ -70,7 +71,9 @@ class ConversationStore:
                 raise ConversationConflict("This conversation was deleted. Start a new chat.")
             db.execute("INSERT OR IGNORE INTO conversations VALUES (?, 0, '[]', '{}', '{}')", (conversation_id,))
             row = db.execute("SELECT revision, messages, trip, requests FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
-        return {"revision": row[0], "messages": json.loads(row[1]), "trip": json.loads(row[2]), "requests": json.loads(row[3])}
+            recommendation = db.execute("SELECT facts FROM conversation_recommendations WHERE id = ?", (conversation_id,)).fetchone()
+        return {"revision": row[0], "messages": json.loads(row[1]), "trip": json.loads(row[2]), "requests": json.loads(row[3]),
+                "recommendation": json.loads(recommendation[0]) if recommendation else None}
 
     def save(self, conversation_id, snapshot, request_id, prompt, result):
         messages = (snapshot["messages"] + [
@@ -86,8 +89,14 @@ class ConversationStore:
             ).rowcount
             if not changed:
                 raise ConversationConflict("Conversation changed during this request. Please send your message again.")
+            recommendation = result.get("recommendation", snapshot.get("recommendation"))
+            if recommendation is None:
+                db.execute("DELETE FROM conversation_recommendations WHERE id = ?", (conversation_id,))
+            else:
+                db.execute("INSERT OR REPLACE INTO conversation_recommendations VALUES (?, ?)", (conversation_id, json.dumps(recommendation)))
 
     def delete(self, conversation_id):
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO deleted_conversations VALUES (?)", (conversation_id,))
             db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+            db.execute("DELETE FROM conversation_recommendations WHERE id = ?", (conversation_id,))

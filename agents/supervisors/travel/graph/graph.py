@@ -33,6 +33,7 @@ from agents.supervisors.travel.graph.tools import get_flights_via_a2a, get_hotel
 from agents.travel.travel_logic import find_cheapest_plan
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
+from agents.supervisors.travel.graph.recommendations import capture_recommendation, explain_recommendation
 from common.llm import get_llm
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
 
@@ -51,6 +52,7 @@ class NodeStates:
     SUPERVISOR = "travel_supervisor"
     TRAVEL_SEARCH = "travel_search"
     GENERAL_INFO = "general"
+    EXPLAIN = "explain_recommendation"
     REFLECTION = "reflection"
 
 
@@ -67,6 +69,7 @@ class GraphState(MessagesState):
     full_response: str = ""
     search_params: dict = {}
     budget_assessment: dict | None = None
+    recommendation: dict | None = None
 
 
 @agent(name="travel_agent")
@@ -129,6 +132,7 @@ class TravelGraph:
         workflow.add_node(NodeStates.SUPERVISOR, self._supervisor_node)
         workflow.add_node(NodeStates.TRAVEL_SEARCH, self._travel_search_node)
         workflow.add_node(NodeStates.GENERAL_INFO, self._general_response_node)
+        workflow.add_node(NodeStates.EXPLAIN, self._explain_recommendation_node)
         workflow.add_node(NodeStates.REFLECTION, self._reflection_node)
 
         # --- 2. Define the Agentic Workflow ---
@@ -141,6 +145,7 @@ class TravelGraph:
             {
                 NodeStates.TRAVEL_SEARCH: NodeStates.TRAVEL_SEARCH,
                 NodeStates.GENERAL_INFO: NodeStates.GENERAL_INFO,
+                NodeStates.EXPLAIN: NodeStates.EXPLAIN,
             },
         )
 
@@ -149,6 +154,7 @@ class TravelGraph:
         
         # General info ends the conversation
         workflow.add_edge(NodeStates.GENERAL_INFO, END)
+        workflow.add_edge(NodeStates.EXPLAIN, END)
 
         # Reflection decides whether to continue or end
         workflow.add_conditional_edges(
@@ -176,6 +182,11 @@ class TravelGraph:
         Returns:
             Updated state with next_node routing decision
         """
+        latest = next((m.content for m in reversed(state["messages"]) if m.type == "human"), "")
+        if isinstance(latest, str) and latest.strip().lower().rstrip("?.!") in {
+            "why this one", "why this trip", "why did you choose this", "explain this recommendation",
+        }:
+            return {"next_node": NodeStates.EXPLAIN}
         if not self.supervisor_llm:
             self.supervisor_llm = get_llm()
 
@@ -186,6 +197,10 @@ class TravelGraph:
             template="""You are a travel planning assistant. Analyze the user's message to determine their intent.
 
 Based on the user's message, respond with ONE of these options:
+- 'explain_recommendation' - only when the user asks why a previous trip was chosen,
+  how its saved cost was calculated, or what criteria selected that recommendation.
+  Do not use this for new searches, changed constraints, refreshed availability,
+  mixed explanation-and-change requests, or general destination advice.
 - 'travel_search' - if the user is asking about:
     * Finding flights or airfare
     * Booking hotels or accommodation
@@ -204,7 +219,7 @@ Short replies to clarification questions and corrections to a trip are travel_se
 Do not classify from keywords alone.
 Conversation: {user_message}
 
-Respond with ONLY 'travel_search' or 'general':""",
+Respond with ONLY 'travel_search', 'explain_recommendation' or 'general':""",
             input_variables=["user_message"]
         )
 
@@ -214,10 +229,18 @@ Respond with ONLY 'travel_search' or 'general':""",
 
         logger.info(f"Supervisor classified intent as: {intent}")
 
+        if intent == NodeStates.EXPLAIN:
+            return {"next_node": NodeStates.EXPLAIN}
         if "travel_search" in intent:
-            return {"next_node": NodeStates.TRAVEL_SEARCH}
+            # A new search or clarification invalidates the previous selection.
+            # Never explain an old destination/party as the newly requested trip.
+            return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None}
         else:
             return {"next_node": NodeStates.GENERAL_INFO}
+
+    async def _explain_recommendation_node(self, state: GraphState) -> dict:
+        response = explain_recommendation(state.get("recommendation"))
+        return {"messages": [AIMessage(content=response)], "full_response": response}
 
     async def _travel_search_node(self, state: GraphState) -> dict:
         """
@@ -533,7 +556,7 @@ Respond with ONLY 'travel_search' or 'general':""",
 
             # Format and return
             response = self._format_travel_plan(plan, params, activities, hotel_checkout_date)
-            return self._quoted_response(response, summary)
+            return {**self._quoted_response(response, summary), "recommendation": capture_recommendation(plan, params)}
             
         except Exception as e:
             logger.error(f"Error during full trip search: {e}")
@@ -1369,14 +1392,15 @@ How can I help you plan your next adventure?"""
             "messages": [AIMessage(content=response)],
         }
 
-    async def serve_conversation(self, prompt: str, history: list, trip: dict) -> dict:
+    async def serve_conversation(self, prompt: str, history: list, trip: dict, recommendation: dict | None = None) -> dict:
         result = await self.graph.ainvoke({
             "messages": history[-12:] + [{"role": "user", "content": prompt}],
             "search_params": trip,
+            "recommendation": recommendation,
         })
         for message in reversed(result.get("messages", [])):
             if isinstance(message, AIMessage) and message.content.strip():
-                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip), "budget_assessment": result.get("budget_assessment")}
+                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip), "budget_assessment": result.get("budget_assessment"), "recommendation": result.get("recommendation")}
         raise RuntimeError("No valid response generated")
 
     async def serve(self, prompt: str) -> str:

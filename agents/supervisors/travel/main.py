@@ -156,7 +156,7 @@ async def handle_prompt(request: PromptRequest):
                         if cached["prompt"] != request.prompt:
                             raise HTTPException(409, "This request ID was already used for another message")
                         return cached["result"]
-                    turn = await travel_graph.serve_conversation(request.prompt, saved["messages"], saved["trip"])
+                    turn = await travel_graph.serve_conversation(request.prompt, saved["messages"], saved["trip"], saved["recommendation"])
                     result = {**turn, "conversation_id": conversation_id, "session_id": session_id["executionID"]}
                     await to_thread(conversation_store.save, conversation_id, saved, request_id, request.prompt, result)
                     return result

@@ -366,12 +366,14 @@ def find_cheapest_plan(
         min_location_rating=min_location_rating
     )
     
+    rating_policy = "standard"
     if not quality_hotels:
         logger.warning(
             f"No hotels meet rating criteria (overall>={min_overall_rating}, "
             f"location>={min_location_rating}). Relaxing criteria..."
         )
         # Fallback: If no hotels meet strict criteria, try with just overall rating
+        rating_policy = "location_relaxed"
         quality_hotels = filter_hotels_by_rating(
             hotels, 
             min_overall_rating=min_overall_rating,
@@ -381,12 +383,15 @@ def find_cheapest_plan(
         if not quality_hotels:
             # Further fallback: use all hotels with any rating >= 3.0
             logger.warning("Still no hotels after relaxing criteria. Using all rated hotels.")
+            rating_policy = "overall_relaxed"
             quality_hotels = [h for h in hotels if (h.get("overall_rating", 0) or h.get("rating", 0) or 0) >= 3.0]
             
             if not quality_hotels:
+                rating_policy = "unfiltered"
                 quality_hotels = hotels  # Last resort: use all hotels
     
     best_plan = None
+    combinations_checked = 0
     best_total_price = float('inf')
     
     for flight in flights:
@@ -406,6 +411,7 @@ def find_cheapest_plan(
         
         # STEP 4: Find cheapest valid hotel for this flight
         for hotel in valid_hotels:
+            combinations_checked += 1
             flight_price = flight.get("price") or 0
             hotel_price = hotel.get("total_price", hotel.get("price")) or 0
             total_price = flight_price + hotel_price
@@ -425,6 +431,10 @@ def find_cheapest_plan(
                 )
     
     if best_plan:
+        best_plan["selection"] = {
+            "rating_policy": rating_policy, "combinations_checked": combinations_checked,
+            "min_overall_rating": min_overall_rating, "min_location_rating": min_location_rating,
+        }
         hotel = best_plan['hotel']
         logger.info(
             f"Found cheapest plan: ${best_plan['total_price']} total "

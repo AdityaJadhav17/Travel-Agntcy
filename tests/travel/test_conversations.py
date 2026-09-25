@@ -176,7 +176,7 @@ def test_queued_turn_observes_previous_saved_context(store, monkeypatch):
     async def scenario():
         entered, finish = asyncio.Event(), asyncio.Event()
 
-        async def model(prompt, messages, trip):
+        async def model(prompt, messages, trip, recommendation=None):
             if prompt == 'Plan New York':
                 entered.set()
                 await finish.wait()
