@@ -45,6 +45,15 @@ async def extract(context):
         params.update(budget_currency=budget[1].upper(), budget_amount=float(budget[2]), budget_scope="quoted_total")
     if "remove budget" in prompt:
         params.update(budget_currency=None, budget_amount=None, budget_scope=None)
+    for field, pattern in (("adults", r"(\d+) adults?"), ("children", r"(\d+) (?:children|child)"), ("rooms", r"(\d+) rooms?")):
+        if match := re.search(pattern, prompt):
+            if field == "children" and int(match[1]) != params.get("children", 0):
+                params["children_ages"] = []
+            params[field] = int(match[1])
+    if ages := re.search(r"ages? ([\d, ]+)", prompt):
+        params["children_ages"] = [int(age) for age in re.findall(r"\d+", ages[1])]
+    if "just me" in prompt:
+        params.update(adults=1, children=0, children_ages=[])
     if "failure" in prompt:
         params.update(search_type="hotel_only", location="Failure City")
     params["clarification_question"] = ""

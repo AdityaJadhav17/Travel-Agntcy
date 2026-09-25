@@ -36,6 +36,7 @@ from config.config import (
     TRAVEL_HOTEL_CHECKIN_GAP_HOURS,
 )
 from agents.travel.travel_logic import find_cheapest_plan
+from agents.travel.party import TravelParty
 
 logger = logging.getLogger("lungo.travel.supervisor.tools")
 
@@ -143,6 +144,7 @@ async def _search_flights_internal(
     outbound_date: str,
     return_date: str = None,
     is_one_way: bool = False,
+    party: TravelParty | None = None,
 ) -> str:
     """
     Internal function to search for flights using the Flight Search Agent via A2A.
@@ -162,6 +164,8 @@ async def _search_flights_internal(
     Returns:
         JSON string with flight results
     """
+    party = TravelParty.model_validate(party.model_dump()) if party else TravelParty()
+    party.require_supported("flight_only")
     trip_type = "one-way" if is_one_way else "round-trip"
     logger.info(f"Sending A2A request to Flight Agent ({trip_type}): {origin} -> {destination}")
     
@@ -172,6 +176,7 @@ async def _search_flights_internal(
     else:
         message = f"origin:{origin} destination:{destination} outbound:{outbound_date} return:{return_date}"
     
+    message += " party:" + party.model_dump_json()
     try:
         result = await _send_a2a_message(FLIGHT_AGENT_CARD, message)
         return result
@@ -184,6 +189,7 @@ async def _search_hotels_internal(
     location: str,
     check_in_date: str,
     check_out_date: str,
+    party: TravelParty | None = None,
 ) -> str:
     """
     Internal function to search for hotels using the Hotel Search Agent via A2A.
@@ -200,7 +206,9 @@ async def _search_hotels_internal(
     logger.info(f"Sending A2A request to Hotel Agent: {location}")
     
     # Format message for the hotel agent
-    message = f"location:{location} check_in:{check_in_date} check_out:{check_out_date}"
+    party = TravelParty.model_validate(party.model_dump()) if party else TravelParty()
+    party.require_supported("hotel_only")
+    message = f"location:{location} check_in:{check_in_date} check_out:{check_out_date} party:" + party.model_dump_json()
     
     try:
         result = await _send_a2a_message(HOTEL_AGENT_CARD, message)
@@ -217,6 +225,7 @@ async def search_flights_a2a(
     destination: str,
     outbound_date: str,
     return_date: str,
+    party: TravelParty | None = None,
 ) -> str:
     """
     Search for flights using the Flight Search Agent via A2A.
@@ -230,17 +239,7 @@ async def search_flights_a2a(
     Returns:
         JSON string with flight results
     """
-    logger.info(f"Sending A2A request to Flight Agent: {origin} -> {destination}")
-    
-    # Format message for the flight agent
-    message = f"origin:{origin} destination:{destination} outbound:{outbound_date} return:{return_date}"
-    
-    try:
-        result = await _send_a2a_message(FLIGHT_AGENT_CARD, message)
-        return result
-    except A2AAgentError as e:
-        logger.error(f"Flight search A2A error: {e}")
-        return json.dumps({"status": "error", "message": str(e)})
+    return await _search_flights_internal(origin, destination, outbound_date, return_date, party=party)
 
 
 @tool
@@ -249,6 +248,7 @@ async def search_hotels_a2a(
     location: str,
     check_in_date: str,
     check_out_date: str,
+    party: TravelParty | None = None,
 ) -> str:
     """
     Search for hotels using the Hotel Search Agent via A2A.
@@ -261,17 +261,7 @@ async def search_hotels_a2a(
     Returns:
         JSON string with hotel results
     """
-    logger.info(f"Sending A2A request to Hotel Agent: {location}")
-    
-    # Format message for the hotel agent
-    message = f"location:{location} check_in:{check_in_date} check_out:{check_out_date}"
-    
-    try:
-        result = await _send_a2a_message(HOTEL_AGENT_CARD, message)
-        return result
-    except A2AAgentError as e:
-        logger.error(f"Hotel search A2A error: {e}")
-        return json.dumps({"status": "error", "message": str(e)})
+    return await _search_hotels_internal(location, check_in_date, check_out_date, party=party)
 
 
 async def get_flights_via_a2a(
@@ -280,6 +270,7 @@ async def get_flights_via_a2a(
     outbound_date: str,
     return_date: str = None,
     is_one_way: bool = False,
+    party: TravelParty | None = None,
 ) -> list:
     """
     Get flights via A2A and parse the response.
@@ -299,20 +290,22 @@ async def get_flights_via_a2a(
     """
     # Use the internal function (not the @tool decorated version)
     result_json = await _search_flights_internal(
-        origin, destination, outbound_date, return_date, is_one_way
+        origin, destination, outbound_date, return_date, is_one_way, party=party
     )
     
     try:
         result = json.loads(result_json)
         if result.get("status") == "success":
-            return result.get("flights", [])
+            quotes = result.get("flights", [])
+            _check_quote_party(quotes, party)
+            return quotes
         else:
             raise A2AAgentError(result.get("message") or "Flight agent search failed")
     except json.JSONDecodeError:
         raise A2AAgentError("Flight agent returned an invalid response") from None
 
 
-async def get_hotels_via_a2a(location: str, check_in_date: str, check_out_date: str) -> list:
+async def get_hotels_via_a2a(location: str, check_in_date: str, check_out_date: str, party: TravelParty | None = None) -> list:
     """
     Get hotels via A2A and parse the response.
     
@@ -326,12 +319,14 @@ async def get_hotels_via_a2a(location: str, check_in_date: str, check_out_date: 
         List of hotel dictionaries
     """
     # Use the internal function (not the @tool decorated version)
-    result_json = await _search_hotels_internal(location, check_in_date, check_out_date)
+    result_json = await _search_hotels_internal(location, check_in_date, check_out_date, party=party)
     
     try:
         result = json.loads(result_json)
         if result.get("status") == "success":
-            return result.get("hotels", [])
+            quotes = result.get("hotels", [])
+            _check_quote_party(quotes, party)
+            return quotes
         else:
             raise A2AAgentError(result.get("message") or "Hotel agent search failed")
     except json.JSONDecodeError:
@@ -339,6 +334,13 @@ async def get_hotels_via_a2a(location: str, check_in_date: str, check_out_date: 
 
 
 # =============================================================================
+def _check_quote_party(quotes, party):
+    if party is not None:
+        expected = TravelParty.model_validate(party.model_dump()).model_dump()
+        if any(quote.get("party") != expected for quote in quotes):
+            raise A2AAgentError("Returned quotes did not confirm the requested travelers and rooms. Please retry the search.")
+
+
 # Activity Search Functions (A2A communication with Activity Agent)
 # =============================================================================
 
@@ -403,6 +405,7 @@ async def find_best_travel_plan(
     start_date: str,
     end_date: str,
     destination_city: str = None,
+    party: TravelParty | None = None,
 ) -> str:
     """
     Find the cheapest flight + hotel combination for a trip using A2A agents.
@@ -428,11 +431,12 @@ async def find_best_travel_plan(
     logger.info(f"Tool: Finding best plan via A2A: {origin} -> {destination}, hotels in {hotel_location}, {start_date} to {end_date}")
     
     try:
+        (party or TravelParty()).require_supported("full_trip")
         # Search for flights via A2A using internal functions
         # (not the @tool decorated versions to avoid 'not callable' error)
-        flight_result = await _search_flights_internal(origin, destination, start_date, end_date)
+        flight_result = await _search_flights_internal(origin, destination, start_date, end_date, party=party)
         # Use city name for hotel search (Google Hotels needs city names, not airport codes)
-        hotel_result = await _search_hotels_internal(hotel_location, start_date, end_date)
+        hotel_result = await _search_hotels_internal(hotel_location, start_date, end_date, party=party)
         
         # Parse flight results
         try:

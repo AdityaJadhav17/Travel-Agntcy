@@ -191,6 +191,56 @@ test("budget survives corrections and reload, can be revised and removed", async
   expect(separate.trip_state.budget_amount).toBeNull()
 })
 
+test("family counts survive clarification and reload and change quoted totals", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const first = await send(
+    page,
+    `Plan New York from Dallas ${start} to ${end}. 2 adults 1 child 2 rooms. Budget USD 1100`,
+  )
+  expect(first.response).toMatch(/ages/)
+  expect(first.trip_state).toMatchObject({ adults: 2, children: 1, rooms: 2 })
+  const ages = await send(page, "Age 7")
+  expect(ages.response).toMatch(/supports one room only/)
+  expect(ages.trip_state.children_ages).toEqual([7])
+  expect(ages.budget_assessment).toBeNull()
+  const family = await send(page, "1 room")
+  expect(family.budget_assessment).toMatchObject({
+    status: "within",
+    quoted_total: 1080,
+  })
+  await expect(
+    page.getByText(/Travelers: 2 adults, 1 child/).last(),
+  ).toBeVisible()
+  await page.reload()
+  await page.getByRole("button", { name: /Plan New York from Dallas/ }).click()
+  const correction = await send(page, "Actually Boston")
+  expect(correction.trip_state).toMatchObject({
+    destination: "BOS",
+    adults: 2,
+    children: 1,
+    children_ages: [7],
+    rooms: 1,
+  })
+  expect(correction.budget_assessment.quoted_total).toBe(1080)
+  const solo = await send(page, "Just me")
+  expect(solo.trip_state).toMatchObject({
+    adults: 1,
+    children: 0,
+    children_ages: [],
+  })
+  expect(solo.budget_assessment.quoted_total).toBe(540)
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  const separate = await send(page, "Plan Tokyo")
+  expect(separate.trip_state).toMatchObject({
+    adults: 1,
+    children: 0,
+    children_ages: [],
+    rooms: 1,
+  })
+})
+
 test("past dates and unavailable providers give actionable replies", async ({
   page,
 }) => {

@@ -130,10 +130,19 @@ The response includes a structured budget assessment, also retained in browser
 history. Unknown prices/currencies do not become affordable zero-cost results.
 Ambiguous, non-USD, nightly, per-person and all-in budgets prompt clarification.
 Activities, meals, transfers and unquoted fees are explicitly excluded; quotes use
-the provider's default passenger/room selection. Removing the budget clears it.
+the requested traveler selection in one hotel room (US7 below). Removing the budget clears it.
 
-US7–US9 and phases 3–4 remain planned. This slice does not enforce passenger or
-room counts, provide token streaming, or support authenticated users.
+US7 is implemented for supported single-room searches, with explicit clarification
+for multi-room requests and infant flight seating. Adults, children, ages at travel,
+and requested rooms persist in conversation state. Provider adapters receive
+validated counts, and quote metadata must match the requested party. US8–US9 and
+phases 3–4 remain planned. See [traveler support](traveler-support.md) for boundaries.
+
+US7 validation: 109 backend tests, 14 Chromium/Firefox journeys, the family
+process-restart probe, and the configured live-model family smoke test pass.
+Targeted branch-inclusive coverage is 97.73% after adding traveler validation.
+Frontend checks and production agent builds also pass. The updated local Docker
+app is running; this slice has not yet been committed or run in GitHub CI.
 
 Browser chat-switch verification also passed: a pending Tokyo reply completed
 in its own chat while the New York result remained unchanged. Reopening Tokyo
@@ -141,14 +150,14 @@ asked for its origin, confirming that Dallas did not leak from the other chat.
 
 The [CI pipeline](ci.md) now protects this work with unit/API regressions and
 credential-free Chromium/Firefox journeys, including concurrent retries and a
-real process restart. The inherited Python dependency vulnerability backlog is a
-blocking check and must be remediated before the overall quality gate turns green.
+real process restart. The dependency audit now uses the maintainer-approved,
+expiring NLTK exception documented in [remediation notes](dependency-remediation.md).
 
 Budget verification: 57 backend tests and 12 Chromium/Firefox E2E tests pass.
 Combined branch-inclusive coverage of conversation storage/coordinating and
 budget decisions is 98.68%. Frontend lint, formatting, types and build pass.
 The budget work also fixes one-way trips showing a one-night label for a
-multi-night hotel stay. The dependency audit blocker remains unchanged.
+multi-night hotel stay. These budget-slice counts predate the traveler regressions.
 
 The configured live model also passed the four-turn budget smoke test: USD 500
 survived the origin clarification, changed to USD 600 alongside a destination

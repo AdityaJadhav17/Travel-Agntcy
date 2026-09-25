@@ -18,6 +18,7 @@ from typing import Optional
 from datetime import datetime
 
 from config.config import SERPAPI_API_KEY, SERPAPI_BASE_URL
+from agents.travel.party import TravelParty
 
 logger = logging.getLogger("lungo.travel.serpapi_tools")
 
@@ -44,6 +45,7 @@ async def search_flights(
     outbound_date: str,
     return_date: str = None,
     include_return_flights: bool = True,
+    party: TravelParty | None = None,
 ) -> list[dict]:
     """
     Search for flights using SerpAPI's Google Flights engine.
@@ -85,6 +87,8 @@ async def search_flights(
         >>> flights = await search_flights("SEA", "SAN", "2026-02-20", include_return_flights=False)
         >>> print(flights[0]["price"])  # Cheapest one-way price
     """
+    party = TravelParty.model_validate(party.model_dump()) if party else TravelParty()
+    passenger_params = party.flight_parameters()
     # Determine if this is a one-way search
     is_one_way = not include_return_flights or not return_date
     trip_type = "one-way" if is_one_way else "round-trip"
@@ -104,6 +108,7 @@ async def search_flights(
     # sort_by=2: Sort results by price (lowest first)
     params = {
         "engine": "google_flights",
+        **passenger_params,
         "api_key": SERPAPI_API_KEY,
         "departure_id": origin.upper(),  # Airport codes should be uppercase
         "arrival_id": destination.upper(),
@@ -136,6 +141,8 @@ async def search_flights(
         for flight_group in best_flights + other_flights:
             flight_info = _parse_flight(flight_group)
             if flight_info:
+                flight_info["party"] = party.model_dump()
+                flight_info["price_scope"] = "requested_party"
                 all_flights.append(flight_info)
         
         logger.info(f"Found {len(all_flights)} outbound flights")
@@ -391,6 +398,7 @@ async def search_hotels(
     location: str,
     check_in_date: str,
     check_out_date: str,
+    party: TravelParty | None = None,
 ) -> list[dict]:
     """
     Search for hotels using SerpAPI's Google Hotels engine.
@@ -419,6 +427,8 @@ async def search_hotels(
         >>> hotels = await search_hotels("Tokyo", "2026-01-15", "2026-01-22")
         >>> print(hotels[0]["name"], hotels[0]["price"])
     """
+    party = TravelParty.model_validate(party.model_dump()) if party else TravelParty()
+    occupancy_params = party.hotel_parameters()
     logger.info(f"Searching hotels in {location}, {check_in_date} to {check_out_date}")
     
     # Validate API key is configured
@@ -431,6 +441,7 @@ async def search_hotels(
     # sort_by=3: Sort by lowest price
     params = {
         "engine": "google_hotels",
+        **occupancy_params,
         "api_key": SERPAPI_API_KEY,
         "q": location,  # Location query string
         "check_in_date": check_in_date,
@@ -456,6 +467,8 @@ async def search_hotels(
             # Parse hotel info - price is as-is from API (per-night or total depending on API)
             hotel_info = _parse_hotel(prop, check_in_date, check_out_date)
             if hotel_info:
+                hotel_info["party"] = party.model_dump()
+                hotel_info["price_scope"] = "requested_party_one_room"
                 hotels.append(hotel_info)
         
         logger.info(f"Found {len(hotels)} hotels")

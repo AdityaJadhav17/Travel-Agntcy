@@ -16,6 +16,7 @@ from langgraph.graph.state import CompiledStateGraph
 from ioa_observe.sdk.decorators import agent, graph
 
 from agents.travel.serpapi_tools import search_flights
+from agents.travel.party import party_from_message
 
 logger = logging.getLogger("lungo.flight.agent")
 
@@ -102,6 +103,7 @@ class FlightSearchAgent:
                 outbound_date=params["outbound_date"],
                 return_date=params.get("return_date") or params["outbound_date"],
                 include_return_flights=not is_one_way,  # Don't fetch return flights for one-way
+                party=party_from_message(user_msg.content),
             )
             
             

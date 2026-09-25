@@ -12,6 +12,7 @@ from uuid import uuid4
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--budget', action='store_true', help='Also verify budget retention, revision and removal')
+    parser.add_argument('--party', action='store_true', help='Verify family clarification, room limits and traveler corrections without provider searches')
     args = parser.parse_args()
     conversation_id = str(uuid4())
     base = "http://localhost:8000"
@@ -23,6 +24,28 @@ def main():
             return json.load(response)
 
     try:
+        if args.party:
+            first = send('Plan a trip to New York for two adults and one child, in two rooms. I have not decided dates yet.')
+            assert first['trip_state']['adults'] == 2, first
+            assert first['trip_state']['children'] == 1, first
+            assert first['trip_state']['rooms'] == 2, first
+            assert 'ages' in first['response'], first
+            second = send('She will be seven at the time of travel.')
+            assert second['trip_state']['children_ages'] == [7], second
+            assert 'supports one room only' in second['response'], second
+            third = send('One room is fine. We are flying from Dallas. Change the destination to Boston.')
+            assert third['trip_state']['rooms'] == 1, third
+            assert third['trip_state']['children_ages'] == [7], third
+            assert third['trip_state']['adults'] == 2, third
+            assert third['trip_state']['destination'] == 'BOS', third
+            assert third['trip_state']['origin'] == 'DFW', third
+            fourth = send('Actually just me, no children, and still no dates decided.')
+            assert fourth['trip_state']['adults'] == 1, fourth
+            assert fourth['trip_state']['children'] == 0, fourth
+            assert fourth['trip_state']['children_ages'] == [], fourth
+            assert not fourth['trip_state']['start_date'], fourth
+            print('Live party clarification, room limitation, retention and removal passed.')
+            return
         first = send("Plan a trip to New York." + (" My budget for the flight fare plus full hotel stay is USD 500 total; exclude other costs." if args.budget else ""))
         assert first["trip_state"]["destination"] in ("JFK", "NYC", "EWR", "LGA")
         second = send("Dallas.")

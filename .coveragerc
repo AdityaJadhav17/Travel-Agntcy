@@ -2,11 +2,14 @@
 branch = True
 # Use a filesystem path: importing the graph package to discover a named module
 # also initializes tracing/NumPy before coverage starts.
-source = agents/supervisors/travel
+source =
+    agents/supervisors/travel
+    agents/travel
 
 [report]
 include =
     */conversations.py
     */graph/budgets.py
+    */travel/party.py
 fail_under = 90
 show_missing = True

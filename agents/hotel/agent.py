@@ -16,6 +16,7 @@ from langgraph.graph.state import CompiledStateGraph
 from ioa_observe.sdk.decorators import agent, graph
 
 from agents.travel.serpapi_tools import search_hotels
+from agents.travel.party import party_from_message
 
 logger = logging.getLogger("lungo.hotel.agent")
 
@@ -79,6 +80,7 @@ class HotelSearchAgent:
                 location=params["location"],
                 check_in_date=params["check_in"],
                 check_out_date=params["check_out"],
+                party=party_from_message(user_msg.content),
             )
             
             

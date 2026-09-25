@@ -19,6 +19,7 @@ def search(request: Request):
     if "failure" in params.get("q", "").lower():
         raise HTTPException(503, "Test provider unavailable")
     if engine == "google_flights":
+        adults, children = int(params["adults"]), int(params["children"])
         inbound = bool(params.get("departure_token"))
         origin, destination = params["departure_id"], params["arrival_id"]
         day = params["return_date"] if inbound else params["outbound_date"]
@@ -29,13 +30,18 @@ def search(request: Request):
             "departure_airport": {"id": origin, "time": f"{day} 10:00"},
             "arrival_airport": {"id": destination, "time": f"{day} 13:00"},
         }
-        return {"best_flights": [{"price": 240, "departure_token": "fixture-outbound", "total_duration": 180, "flights": [flight]}]}
+        return {"best_flights": [{"price": adults * 240 + children * 150, "departure_token": "fixture-outbound", "total_duration": 180, "flights": [flight]}]}
     if engine == "google_hotels":
+        adults, children = int(params["adults"]), int(params["children"])
+        ages = params.get("children_ages", "").split(",") if children else []
+        if len(ages) != children or any(not 1 <= int(age) <= 17 for age in ages):
+            raise HTTPException(400, "Missing or invalid child ages")
         nights = (date.fromisoformat(params["check_out_date"]) - date.fromisoformat(params["check_in_date"])).days
+        nightly = 100 + (adults - 1) * 30 + children * 20
         return {"properties": [{
             "name": "Fixture Central Hotel", "overall_rating": 4.6,
             "check_in_time": "3:00 PM", "check_out_time": "11:00 AM",
-            "rate_per_night": {"extracted_lowest": 100},
-            "total_rate": {"extracted_lowest": nights * 100},
+            "rate_per_night": {"extracted_lowest": nightly},
+            "total_rate": {"extracted_lowest": nights * nightly},
         }]}
     return {"local_results": [{"title": "Fixture City Museum", "rating": 4.8, "reviews": 123, "type": "Museum"}]}

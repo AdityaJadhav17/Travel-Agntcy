@@ -285,7 +285,7 @@ now persist across follow-ups and filter priced results. For example: "Plan a tr
 to New York; budget USD 600 total for flight and hotel", then supply your origin
 and dates. You can revise or remove the budget later.
 
-The comparison covers the provider's default passenger/room selection and the
+The comparison covers the requested travelers in one hotel room and the
 flight fare and/or full hotel stay for the current search. Activities, meals,
 transfers and unquoted fees are excluded. Nightly, per-person, all-in and non-USD
 budgets trigger clarification; no exchange rates are invented. The UI shows a
@@ -293,7 +293,17 @@ structured budget assessment, retained after reloading a chat. Incomplete or
 non-USD quotes cannot count as affordable. Results remain search quotes, not
 booking guarantees.
 
-Passenger/room selection, retained-result explanations, fully structured result
-cards, and conversational streaming remain planned. The opt-in live-model check
+Traveler counts, children's ages and requested rooms now persist across follow-ups.
+For example, say "two adults and one child, two rooms"; the assistant asks for the
+child's age and explains that multi-room quotes are unsupported. It only switches
+to one room when you agree. Adult/child counts reach flight and hotel searches;
+quotes for the wrong party are rejected. Searches default to one adult, no children,
+and one room, and responses show that selection. Up to nine travelers are supported.
+Infant flight seating is not supported yet; hotel searches can include infants.
+
+Retained-result explanations, fully structured result cards, and conversational
+streaming remain planned. The opt-in live-model check
 `python scripts/conversation_smoke_test.py --budget` tests budget follow-ups
 without making a priced provider search.
+Use `--party` instead to check family details, age clarification, room limitations
+and traveler corrections. See [traveler support](docs/traveler-support.md).

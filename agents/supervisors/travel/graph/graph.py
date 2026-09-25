@@ -21,7 +21,7 @@ import json
 import uuid
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import AIMessage, SystemMessage
 from langgraph.graph.state import CompiledStateGraph
@@ -254,12 +254,16 @@ Respond with ONLY 'travel_search' or 'general':""",
                 "latest_user_message": user_msg.content,
             })
             params = await self._extract_travel_params(context)
+        except ValidationError:
+            return {"messages": [AIMessage(content="Please check your trip details. Use whole-number counts: 1–9 adults, 0–8 children with ages 0–17, and 1–9 requested rooms. I have kept your previous trip details.")]}
         except Exception as e:
             logger.error(f"Failed to extract travel params: {e}")
             return {"messages": [AIMessage(content="I had trouble understanding your request. Could you please specify your origin, destination, and travel dates?")]}
 
         # Persist extracted details even when the next response is a question.
         trip = params.model_dump()
+        if party_question := params.question(params.search_type):
+            return {"messages": [AIMessage(content=party_question)], "search_params": trip}
         if params.clarification_question:
             return {"messages": [AIMessage(content=params.clarification_question)], "search_params": trip}
         budget_clarification = budget_question(params)
@@ -278,6 +282,13 @@ Respond with ONLY 'travel_search' or 'general':""",
             "full_trip": self._handle_full_trip_search,
         }
         result = await handlers[params.search_type](params)
+        if params.search_type != "activity_only":
+            # Keep the budget prefix intact for the UI's structured assessment.
+            label = params.label(params.search_type)
+            for message in result.get("messages", []):
+                message.content += "\n\n" + label
+            if result.get("full_response"):
+                result["full_response"] += "\n\n" + label
         return {**result, "search_params": trip}
 
     @staticmethod
@@ -368,7 +379,7 @@ Respond with ONLY 'travel_search' or 'general':""",
         logger.info(f"Searching hotels only for location: {location}, {params.start_date} to {params.end_date}")
         
         try:
-            hotels = await get_hotels_via_a2a(location, params.start_date, params.end_date)
+            hotels = await get_hotels_via_a2a(location, params.start_date, params.end_date, party=params)
             summary = None
             if params.budget_amount is not None:
                 hotels, summary = filter_quotes(hotels, "hotel", params)
@@ -419,6 +430,7 @@ Respond with ONLY 'travel_search' or 'general':""",
                 params.start_date,
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
+                party=params,
             )
             
             summary = None
@@ -476,6 +488,7 @@ Respond with ONLY 'travel_search' or 'general':""",
                 params.start_date,
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
+                party=params,
             )
             
             if not flights:
@@ -483,7 +496,7 @@ Respond with ONLY 'travel_search' or 'general':""",
 
             # Search for hotels
             hotel_location = params.destination_city or params.destination
-            hotels = await get_hotels_via_a2a(hotel_location, params.start_date, hotel_checkout_date)
+            hotels = await get_hotels_via_a2a(hotel_location, params.start_date, hotel_checkout_date, party=params)
             
             if not hotels:
                 return {"messages": [AIMessage(content=f"I found flights but couldn't find hotels in {hotel_location}.")]}
@@ -570,7 +583,18 @@ limits including meals/activities/transfers; the app will explain unsupported sc
 Leave budget_scope null when unclear. If switching search types with a saved budget,
 ask whether the limit should now apply to the new search before applying it.
 If the assistant asked to confirm quoted-cost scope, a positive answer sets quoted_total.
-Do not claim passenger counts, rooms or unpriced preferences are enforced.
+Extract adults (18+), children (under 18, including infants), children_ages and rooms.
+Preserve these across replies and corrections, including unsupported room counts.
+New trips default to 1 adult, 0 children and 1 room unless the user says otherwise.
+Never invent ages. Ask ambiguous total-party compositions via clarification_question.
+A reply to an ages question supplies children_ages at travel time. Ages 12-17 remain
+children here; the flight adapter maps them to adult fares. When the number of
+children changes, clear old ages unless the user explicitly retains particular ages.
+Removing children sets children=0 and children_ages=[]. "Just me" sets adults=1,
+children=0 and children_ages=[]. Do not silently change a multi-room request to one
+room; only do so when the user agrees. Infant seating and multi-room quotes are
+unsupported; preserve the request so the app explains this. Do not claim unpriced
+preferences are enforced.
 
 
 Today's date: {datetime.now().date().isoformat()}

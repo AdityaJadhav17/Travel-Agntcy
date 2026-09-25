@@ -55,7 +55,7 @@ def quote_total(quote, kind, params):
 def assessment(params, total):
     limit = money(params.budget_amount)
     scope = {"full_trip": "flight + full hotel stay", "flight_only": "flight fare", "hotel_only": "full hotel stay"}[params.search_type]
-    exclusions = "For the provider's default passenger/room selection. Activities, meals, transfers and unquoted fees are excluded. Prices can change."
+    exclusions = params.label(params.search_type) + " Activities, meals, transfers and unquoted fees are excluded. Prices can change."
     if total is None:
         status = "unknown"
         message = f"Budget check: USD {limit:.2f} for {scope}. No complete USD quote was available to verify this budget. {exclusions}"

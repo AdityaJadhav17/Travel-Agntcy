@@ -10,7 +10,7 @@ does not itself change repository branch protection.
 | Check | Scope |
 | --- | --- |
 | Frontend | ESLint without fixes, Prettier, TypeScript (including E2E sources), Vite production build, npm audit including development dependencies |
-| Python | Ruff on application/configuration/scripts and current travel tests; unit/API regressions; JUnit and coverage XML; 90% branch-inclusive coverage floor on the conversation repository/turn coordinator and budget decisions |
+| Python | Ruff on application/configuration/scripts and current travel tests; unit/API regressions; JUnit and coverage XML; 90% branch-inclusive coverage floor on conversation storage/turn coordination, budget decisions and traveler validation |
 | Python audit | `uv export --locked --group ci`, full pip-audit report, and fail-closed enforcement of exact, time-limited exceptions; unapproved findings block |
 | E2E | Chromium and Firefox against nginx, FastAPI, SQLite, three agent services and NATS; separate API restart-persistence probe |
 | Infrastructure | actionlint, redacted Gitleaks source scan, tracked-file hygiene, Linux report-permission regression, strict Helm lint, builds of all five production images |
@@ -52,7 +52,8 @@ Keep `scripts/conversation_smoke_test.py` as an opt-in real-provider check.
 
 Journeys cover clarification across turns, destination correction, reload,
 separate chats, late responses, deletion, invalid dates/IDs, provider failures,
-budget retention/revision/removal, and both overlapping and completed retries. Dates are generated in the future.
+budget retention/revision/removal, family ages/counts/room clarification and quoted
+totals, and both overlapping and completed retries. Dates are generated in the future.
 No test uses a real user's conversation or the developer's conversation volume.
 
 ## Run locally with Docker

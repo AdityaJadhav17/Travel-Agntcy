@@ -11,9 +11,10 @@ proper parsing of user travel requests.
 
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
+from agents.travel.party import TravelParty
 
 
-class TravelSearchArgs(BaseModel):
+class TravelSearchArgs(TravelParty):
     """
     Arguments extracted from user input for travel search.
     
