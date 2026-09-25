@@ -36,7 +36,7 @@ jobs:
       - name: Audit production and development dependencies
         if: ${{ !cancelled() }}
         run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks sh -c 'npm audit --audit-level=low --json > /reports/npm-audit.json'
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: frontend-audit
@@ -65,7 +65,7 @@ jobs:
           --junitxml=/reports/pytest.xml
           --cov --cov-config=.coveragerc --cov-branch --cov-fail-under=90
           --cov-report=term-missing --cov-report=xml:/reports/coverage.xml
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: python-tests-and-coverage
@@ -107,7 +107,7 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: python-dependency-audit
@@ -146,7 +146,7 @@ jobs:
         run: |
           mkdir -p .runtime/ci
           docker compose -p travel-ci -f compose.ci.yaml logs --no-color > .runtime/ci/services.log 2>&1
-      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: browser-e2e-reports
