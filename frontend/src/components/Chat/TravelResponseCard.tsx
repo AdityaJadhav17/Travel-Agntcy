@@ -75,6 +75,7 @@ const detectResponseType = (
 const parseFullTripResponse = (content: string) => {
   const sections: {
     intro?: string
+    notice?: string
     totalCost?: string
     flightCost?: string
     hotelCost?: string
@@ -103,6 +104,15 @@ const parseFullTripResponse = (content: string) => {
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed || trimmed === "---") continue
+
+    if (
+      trimmed.startsWith(
+        "I kept your selected flight and found a different hotel.",
+      )
+    ) {
+      sections.notice = trimmed
+      continue
+    }
 
     // Detect sections
     if (
@@ -537,6 +547,11 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
 
   return (
     <div className="space-y-4">
+      {sections.notice && (
+        <p className="rounded-xl border border-blue-500/40 bg-blue-500/10 p-4 text-sm text-blue-100">
+          {sections.notice}
+        </p>
+      )}
       {/* Success Header */}
       {sections.intro && (
         <div className="flex items-center gap-3 rounded-xl border border-[#3ce98a]/30 bg-gradient-to-r from-[#3ce98a]/20 to-[#5feb9b]/10 p-4">

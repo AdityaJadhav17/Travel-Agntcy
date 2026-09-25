@@ -43,5 +43,10 @@ def search(request: Request):
             "check_in_time": "3:00 PM", "check_out_time": "11:00 AM",
             "rate_per_night": {"extracted_lowest": nightly},
             "total_rate": {"extracted_lowest": nights * nightly},
+        }, {
+            "name": "Fixture Riverside Hotel", "overall_rating": 4.4,
+            "check_in_time": "3:00 PM", "check_out_time": "11:00 AM",
+            "rate_per_night": {"extracted_lowest": nightly + 25},
+            "total_rate": {"extracted_lowest": nights * (nightly + 25)},
         }]}
     return {"local_results": [{"title": "Fixture City Museum", "rating": 4.8, "reviews": 123, "type": "Museum"}]}

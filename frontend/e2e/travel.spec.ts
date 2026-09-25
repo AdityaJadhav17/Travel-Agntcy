@@ -25,7 +25,7 @@ test("explains a retained trip after reload and does not leak it to a new chat",
   const prompt = "Plan Dallas to New York"
   await send(page, prompt)
   const found = await send(page, `${start} to ${end}`)
-  expect(found.recommendation.version).toBe(1)
+  expect(found.recommendation.version).toBe(2)
   await page.reload()
   await page.getByRole("button", { name: prompt, exact: true }).click()
   const explained = await send(page, "Why this one?")
@@ -43,6 +43,32 @@ test("explains a retained trip after reload and does not leak it to a new chat",
   await expect(
     page.getByText(/don't have a saved full-trip recommendation/),
   ).toBeVisible()
+})
+
+test("keeps the selected flight while changing only the hotel after reload", async ({
+  page,
+}) => {
+  await page.goto("/")
+  await send(page, "Plan Dallas to New York")
+  const first = await send(page, `${start} to ${end}`)
+  expect(first.recommendation.hotel.name).toBe("Fixture Central Hotel")
+  const flightId = first.recommendation.flight.id
+  await page.reload()
+  await page.getByRole("button", { name: "Plan Dallas to New York" }).click()
+  const swapped = await send(page, "Keep the flights, change the hotel")
+  expect(swapped.recommendation.flight.id).toBe(flightId)
+  expect(swapped.recommendation.hotel.name).toBe("Fixture Riverside Hotel")
+  expect(swapped.recommendation.hotel.id).not.toBe(
+    first.recommendation.hotel.id,
+  )
+  await expect(
+    page.getByText(/I kept your selected flight and found a different hotel/),
+  ).toBeVisible()
+  await expect(page.getByText(/Activities were not refreshed/)).toBeVisible()
+  const explained = await send(page, "Why this one?")
+  expect(explained.recommendation.hotel.id).toBe(
+    swapped.recommendation.hotel.id,
+  )
 })
 
 test("clarifies, searches real agents, reloads and corrects the destination", async ({

@@ -54,8 +54,9 @@ Journeys cover clarification across turns, destination correction, reload,
 separate chats, late responses, deletion, invalid dates/IDs, provider failures,
 budget retention/revision/removal, family ages/counts/room clarification and quoted
 totals, retained recommendation explanations, and both overlapping and completed
-retries. The process-restart probe checks retained recommendation facts as well
-as family conversation state. Dates are generated in the future.
+retries. The process-restart probe checks retained recommendation facts, a
+selective hotel replacement and family conversation state. Dates are generated
+in the future.
 No test uses a real user's conversation or the developer's conversation volume.
 
 ## Run locally with Docker

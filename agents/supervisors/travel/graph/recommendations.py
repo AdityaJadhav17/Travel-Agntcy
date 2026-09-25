@@ -19,12 +19,38 @@ class QuoteFacts(BaseModel):
     total_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
 
 
+class FlightItinerary(BaseModel):
+    """Only the fields needed to reuse or recheck the selected flight."""
+
+    price: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    currency: str = Field(default="", max_length=3)
+    airline: str = Field(default="", max_length=160)
+    departure_time: str = Field(default="", max_length=80)
+    departure_code: str = Field(default="", max_length=8)
+    arrival_time: str = Field(default="", max_length=80)
+    arrival_code: str = Field(default="", max_length=8)
+    stops: int = Field(default=0, ge=0)
+    duration_minutes: int = Field(default=0, ge=0)
+    return_flight: "ReturnItinerary | None" = None
+
+
+class ReturnItinerary(BaseModel):
+    airline: str = Field(default="", max_length=160)
+    departure_time: str = Field(default="", max_length=80)
+    departure_code: str = Field(default="", max_length=8)
+    arrival_time: str = Field(default="", max_length=80)
+    arrival_code: str = Field(default="", max_length=8)
+    stops: int = Field(default=0, ge=0)
+    duration_minutes: int = Field(default=0, ge=0)
+
+
 class Recommendation(BaseModel):
-    version: Literal[1] = 1
+    version: Literal[1, 2] = 2
     id: str
     searched_at: datetime
     trip: TravelSearchArgs
     flight: QuoteFacts
+    flight_itinerary: FlightItinerary | None = None
     hotel: QuoteFacts
     arrival_time: str
     rating_policy: Literal["standard", "location_relaxed", "overall_relaxed", "unfiltered"]
@@ -46,10 +72,11 @@ def quote_facts(quote, kind, trip):
             "origin", "destination", "destination_city", "start_date", "end_date",
             "is_one_way", "adults", "children", "children_ages", "rooms",
         )},
-        "facts": {key: quote.get(key) for key in (
-            "name", "airline", "departure_time", "arrival_time", "price",
-            "total_price", "currency", "check_in_date", "check_out_date",
-        )},
+        "facts": ({"name": clean_text(quote.get("name"))} if kind == "hotel" else {
+            key: quote.get(key) for key in (
+                "airline", "departure_time", "arrival_time", "departure_code", "arrival_code", "stops",
+            )
+        }),
     }
     identity["return_flight"] = {key: (quote.get("return_flight") or {}).get(key) for key in (
         "airline", "departure_code", "arrival_code", "departure_time", "arrival_time", "stops",
@@ -63,9 +90,18 @@ def quote_facts(quote, kind, trip):
 
 def capture_recommendation(plan, trip):
     """Retain only display facts and actual decision metadata, never raw payloads."""
+    itinerary = FlightItinerary.model_validate(plan["flight"]).model_dump()
+    for field in ("airline", "departure_time", "departure_code", "arrival_time", "arrival_code"):
+        if itinerary[field]:
+            itinerary[field] = clean_text(itinerary[field])[:80 if "time" in field else 160]
+    if itinerary["return_flight"]:
+        for field in ("airline", "departure_time", "departure_code", "arrival_time", "arrival_code"):
+            if itinerary["return_flight"][field]:
+                itinerary["return_flight"][field] = clean_text(itinerary["return_flight"][field])[:80 if "time" in field else 160]
     return Recommendation(
         id=str(uuid4()), searched_at=datetime.now(timezone.utc), trip=trip,
         flight=quote_facts(plan["flight"], "flight", trip),
+        flight_itinerary=FlightItinerary.model_validate(itinerary),
         hotel=quote_facts(plan["hotel"], "hotel", trip),
         arrival_time=clean_text(plan["arrival_time"]),
         **plan["selection"],

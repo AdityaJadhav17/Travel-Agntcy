@@ -136,8 +136,8 @@ US7 is implemented for supported single-room searches, with explicit clarificati
 for multi-room requests and infant flight seating. Adults, children, ages at travel,
 and requested rooms persist in conversation state. Provider adapters receive
 validated counts, and quote metadata must match the requested party. US8 and
-phases 3–4 remain planned. US9 now has the full-trip explanation slice described
-below. See [traveler support](traveler-support.md) for boundaries.
+US9 are described below; phases 3–4 remain planned. See
+[traveler support](traveler-support.md) for boundaries.
 
 US7 validation: 109 backend tests, 14 Chromium/Firefox journeys, the family
 process-restart probe, and the configured live-model family smoke test pass.
@@ -185,9 +185,8 @@ Greetings and repeated explanations retain it. Chats created before this feature
 need one successful full-trip search to acquire a snapshot. Single-category search
 lists do not yet retain selections for explanation.
 
-This slice establishes retained facts before US8. Selective hotel replacement,
-retaining an executable flight itinerary and refreshing stale provider quotes are
-still unimplemented; explanation never silently substitutes a new selection.
+US8 builds on these retained facts. Explanations never silently substitute a
+new selection.
 
 Docker verification: 124 backend tests pass, with 98.97% branch-inclusive coverage
 across the gated modules, including 100% for recommendation facts/explanations.
@@ -196,4 +195,36 @@ typecheck, frontend build and the production supervisor build. Deterministic tes
 cover model routing boundaries; these results do not measure live-model accuracy.
 The real CI API process-restart probe also passed for both family trip state and
 the exact retained recommendation. The local Docker app was recreated with the
-updated supervisor and all services reported healthy. Changes remain uncommitted.
+updated supervisor and all services reported healthy. This US9 slice was
+committed as `b9638207` before the US8 work below.
+
+### Selective hotel replacement (US8)
+
+“Keep the flights, change the hotel” retains the selected flight, destination,
+dates, traveler counts, room count and budget. The supervisor requests fresh
+hotel results through the existing A2A agent, excludes the previously selected
+hotel and chooses the lowest eligible alternative. It checks check-in timing,
+the full hotel stay price and the combined USD budget before saving a new
+recommendation. Activity suggestions are not searched again, and the UI shows
+the quote age and that activities were not refreshed.
+
+The saved selection now includes a bounded flight itinerary and stable quote
+IDs based on itinerary details or hotel identity rather than price. A selected
+flight quote under five minutes old is reused for a hotel-only change. Older
+flight quotes trigger a provider flight search to recheck the same itinerary.
+If that itinerary is missing or has no complete USD quote, the app declines to
+present a refreshed trip. It never silently substitutes a different flight.
+The provider data does not guarantee a specific fare class or booking inventory;
+search results remain quotes that can change before booking.
+
+No eligible different hotel, provider failure, unsupported legacy snapshot,
+or an over-budget replacement leaves the previous recommendation available
+with a focused explanation. Conversations saved before the itinerary snapshot
+was added need one new full-trip search before hotel replacement. Requests
+that also change dates, party, destination, budget or specific hotel preferences
+continue through normal trip extraction and search, rather than the simple swap.
+
+Docker verification: 132 backend tests and 18 Chromium/Firefox journeys pass.
+Branch-inclusive coverage across the gated modules is 98.78%; Ruff, frontend
+lint, formatting, types, production build, and an actual API restart with a
+hotel change all pass.

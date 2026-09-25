@@ -18,8 +18,9 @@ Node Flow:
 
 import logging
 import json
+import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from pydantic import BaseModel, Field, ValidationError
 from langchain_core.prompts import PromptTemplate
@@ -33,7 +34,7 @@ from agents.supervisors.travel.graph.tools import get_flights_via_a2a, get_hotel
 from agents.travel.travel_logic import find_cheapest_plan
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
-from agents.supervisors.travel.graph.recommendations import capture_recommendation, explain_recommendation
+from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, explain_recommendation, quote_facts
 from common.llm import get_llm
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
 
@@ -53,6 +54,7 @@ class NodeStates:
     TRAVEL_SEARCH = "travel_search"
     GENERAL_INFO = "general"
     EXPLAIN = "explain_recommendation"
+    HOTEL_CHANGE = "change_hotel"
     REFLECTION = "reflection"
 
 
@@ -133,6 +135,7 @@ class TravelGraph:
         workflow.add_node(NodeStates.TRAVEL_SEARCH, self._travel_search_node)
         workflow.add_node(NodeStates.GENERAL_INFO, self._general_response_node)
         workflow.add_node(NodeStates.EXPLAIN, self._explain_recommendation_node)
+        workflow.add_node(NodeStates.HOTEL_CHANGE, self._change_hotel_node)
         workflow.add_node(NodeStates.REFLECTION, self._reflection_node)
 
         # --- 2. Define the Agentic Workflow ---
@@ -146,6 +149,7 @@ class TravelGraph:
                 NodeStates.TRAVEL_SEARCH: NodeStates.TRAVEL_SEARCH,
                 NodeStates.GENERAL_INFO: NodeStates.GENERAL_INFO,
                 NodeStates.EXPLAIN: NodeStates.EXPLAIN,
+                NodeStates.HOTEL_CHANGE: NodeStates.HOTEL_CHANGE,
             },
         )
 
@@ -155,6 +159,7 @@ class TravelGraph:
         # General info ends the conversation
         workflow.add_edge(NodeStates.GENERAL_INFO, END)
         workflow.add_edge(NodeStates.EXPLAIN, END)
+        workflow.add_edge(NodeStates.HOTEL_CHANGE, END)
 
         # Reflection decides whether to continue or end
         workflow.add_conditional_edges(
@@ -187,6 +192,14 @@ class TravelGraph:
             "why this one", "why this trip", "why did you choose this", "explain this recommendation",
         }:
             return {"next_node": NodeStates.EXPLAIN}
+        normalized = " ".join(re.sub(r"[,?.!]", " ", latest.lower()).split()) if isinstance(latest, str) else ""
+        if normalized in {
+            "keep the flights change the hotel", "keep my flights change the hotel",
+            "keep the flight change the hotel", "keep my flight change the hotel",
+            "change the hotel", "change my hotel", "replace the hotel", "swap the hotel",
+            "find another hotel", "find a different hotel",
+        }:
+            return {"next_node": NodeStates.HOTEL_CHANGE}
         if not self.supervisor_llm:
             self.supervisor_llm = get_llm()
 
@@ -197,6 +210,11 @@ class TravelGraph:
             template="""You are a travel planning assistant. Analyze the user's message to determine their intent.
 
 Based on the user's message, respond with ONE of these options:
+- 'change_hotel' - the traveler wants a different hotel while keeping the
+  previously selected flight and the same destination, dates, party and budget.
+  Use only for a simple hotel swap without a new preference or changed constraint.
+  If the user changes dates, party, destination, budget or requests a specific
+  hotel/amenity, use travel_search so those details can be extracted first.
 - 'explain_recommendation' - only when the user asks why a previous trip was chosen,
   how its saved cost was calculated, or what criteria selected that recommendation.
   Do not use this for new searches, changed constraints, refreshed availability,
@@ -219,7 +237,7 @@ Short replies to clarification questions and corrections to a trip are travel_se
 Do not classify from keywords alone.
 Conversation: {user_message}
 
-Respond with ONLY 'travel_search', 'explain_recommendation' or 'general':""",
+Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or 'general':""",
             input_variables=["user_message"]
         )
 
@@ -231,6 +249,8 @@ Respond with ONLY 'travel_search', 'explain_recommendation' or 'general':""",
 
         if intent == NodeStates.EXPLAIN:
             return {"next_node": NodeStates.EXPLAIN}
+        if intent == NodeStates.HOTEL_CHANGE:
+            return {"next_node": NodeStates.HOTEL_CHANGE}
         if "travel_search" in intent:
             # A new search or clarification invalidates the previous selection.
             # Never explain an old destination/party as the newly requested trip.
@@ -241,6 +261,93 @@ Respond with ONLY 'travel_search', 'explain_recommendation' or 'general':""",
     async def _explain_recommendation_node(self, state: GraphState) -> dict:
         response = explain_recommendation(state.get("recommendation"))
         return {"messages": [AIMessage(content=response)], "full_response": response}
+
+    async def _change_hotel_node(self, state: GraphState) -> dict:
+        """Keep the selected flight; refresh it only when its quote is stale."""
+        saved = state.get("recommendation")
+        try:
+            selected = Recommendation.model_validate(saved)
+        except (ValidationError, TypeError):
+            selected = None
+        if not selected or selected.version != 2 or not selected.flight_itinerary:
+            return self._quoted_response(
+                "I need a recent full-trip search before I can keep a specific flight and change the hotel. Please search for the trip again."
+            )
+        params = selected.trip
+        flight = selected.flight_itinerary.model_dump(exclude_none=True)
+        if not params.is_one_way and not flight.get("return_flight"):
+            return self._quoted_response(
+                "The saved round-trip quote lacks a specific return itinerary. Please search for the trip again before changing hotels."
+            )
+        if quote_total(flight, "flight", params) is None:
+            return self._quoted_response(
+                "The saved flight lacks a complete USD quote. Please search for the trip again before changing hotels."
+            )
+
+        searched_at = selected.searched_at.astimezone(timezone.utc)
+        age = datetime.now(timezone.utc) - searched_at
+        if age < timedelta(0):
+            return self._quoted_response("The saved quote has an invalid search time. Please search for the trip again.")
+        refreshed = age >= timedelta(minutes=5)
+        try:
+            if refreshed:
+                current_flights = await get_flights_via_a2a(
+                    params.origin, params.destination, params.start_date,
+                    params.end_date if not params.is_one_way else None,
+                    is_one_way=params.is_one_way, party=params,
+                )
+                # Keep precisely the chosen itinerary. Never silently replace it
+                # with a different flight when a provider no longer returns it.
+                flight = next((candidate for candidate in current_flights
+                               if quote_facts(candidate, "flight", params).id == selected.flight.id), None)
+                if flight is None or quote_total(flight, "flight", params) is None:
+                    return self._quoted_response(
+                        "I couldn't verify the same flight at a current USD price. Your earlier recommendation is still in this chat, but its price is old. Search the full trip again for new options."
+                    )
+
+            hotel_location = params.destination_city or params.destination
+            hotels = await get_hotels_via_a2a(hotel_location, params.start_date, params.end_date, party=params)
+        except Exception:
+            logger.exception("Failed to refresh selected flight or search replacement hotels")
+            return self._quoted_response(
+                "I couldn't check replacement quotes right now. Your previous recommendation remains saved; please try again."
+            )
+
+        alternatives = [
+            {**hotel, "total_price": float(total)}
+            for hotel in hotels
+            if quote_facts(hotel, "hotel", params).id != selected.hotel.id
+            if (total := quote_total(hotel, "hotel", params)) is not None
+        ]
+        if not alternatives:
+            return self._quoted_response(
+                "I couldn't find a different hotel with a complete USD stay quote for the same dates and travelers. Your earlier recommendation remains saved."
+            )
+        plan = find_cheapest_plan([flight], alternatives)
+        if not plan:
+            return self._quoted_response(
+                "The other hotels did not match your flight arrival and check-in timing. Your earlier recommendation remains saved."
+            )
+
+        summary = None
+        if params.budget_amount is not None:
+            total = quote_total(flight, "flight", params) + quote_total(plan["hotel"], "hotel", params)
+            summary = assessment(params, total)
+            if summary["status"] == "over":
+                return self._quoted_response(
+                    "The lowest different hotel would put this flight + full hotel stay over your budget. I kept the earlier recommendation; revise your budget or ask for a full new search.",
+                    summary,
+                )
+
+        response = self._format_travel_plan(plan, params, [], params.end_date)
+        price_note = ("I refreshed the same flight itinerary at the provider's current quoted price. "
+                      if refreshed else "I kept the selected flight quote from the last five minutes. ")
+        response = (
+            f"I kept your selected flight and found a different hotel. {price_note}"
+            "I searched hotels again for the same dates and travelers. Activities were not refreshed.\n\n"
+            + response + "\n\n" + params.label("full_trip")
+        )
+        return {**self._quoted_response(response, summary), "recommendation": capture_recommendation(plan, params)}
 
     async def _travel_search_node(self, state: GraphState) -> dict:
         """

@@ -42,6 +42,9 @@ elif sys.argv[1] == "verify":
     explanation = turn(saved_probe["recommendation_id"], "Why this one?")
     assert explanation["recommendation"] == saved_probe["recommendation"], explanation
     assert "USD 540.00" in explanation["response"], explanation
+    replaced = turn(saved_probe["recommendation_id"], "Keep the flights, change the hotel")
+    assert replaced["recommendation"]["flight"]["id"] == saved_probe["recommendation"]["flight"]["id"], replaced
+    assert replaced["recommendation"]["hotel"]["name"] == "Fixture Riverside Hotel", replaced
     with urllib.request.urlopen(urllib.request.Request(f"http://localhost:8000/conversations/{saved_probe['recommendation_id']}", method="DELETE")) as response:
         assert response.status == 204
     with urllib.request.urlopen(urllib.request.Request(f"http://localhost:8000/conversations/{conversation_id}", method="DELETE")) as response:

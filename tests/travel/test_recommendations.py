@@ -85,9 +85,12 @@ def test_snapshot_is_bounded_and_omits_provider_tokens():
     assert "not-for-storage" not in json.dumps(saved)
     assert "At the time of search" not in explain_recommendation(saved)
     assert quote_facts(flight, "flight", params).id == saved["flight"]["id"]
-    assert quote_facts({**flight, "price": 250}, "flight", params).id != saved["flight"]["id"]
+    assert quote_facts({**flight, "price": 250}, "flight", params).id == saved["flight"]["id"]
+    assert quote_facts({**flight, "arrival_time": f"{params.start_date} 14:00"}, "flight", params).id != saved["flight"]["id"]
     assert quote_facts(flight, "flight", params.model_copy(update={"budget_amount": 999})).id == saved["flight"]["id"]
     assert quote_facts({**flight, "return_flight": {"airline": "Other Air"}}, "flight", params).id != saved["flight"]["id"]
+    assert saved["version"] == 2
+    assert "secret_provider_token" not in json.dumps(saved["flight_itinerary"])
 
 
 @pytest.mark.parametrize("saved,phrase", [(None, "don't have a saved"), ({"version": 99}, "can't reliably read")])
