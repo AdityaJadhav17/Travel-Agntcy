@@ -31,6 +31,10 @@ TRANSPORT_SERVER_ENDPOINT = os.getenv("TRANSPORT_SERVER_ENDPOINT", "nats://local
 # =============================================================================
 # Language model settings - uses litellm for provider abstraction
 LLM_MODEL = os.getenv("LLM_MODEL", "")
+LLM_INTENT_MODEL = os.getenv("LLM_INTENT_MODEL", "")
+LLM_EXTRACTION_MODEL = os.getenv("LLM_EXTRACTION_MODEL", "")
+LLM_REFLECTION_MODEL = os.getenv("LLM_REFLECTION_MODEL", "")
+LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "low")
 
 # OAuth2 OpenAI Provider (optional)
 OAUTH2_CLIENT_ID = os.getenv("OAUTH2_CLIENT_ID", "")

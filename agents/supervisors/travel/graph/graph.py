@@ -137,7 +137,6 @@ class TravelGraph:
         # LLM instances - lazy initialized on first use
         self.supervisor_llm = None
         self.reflection_llm = None
-        self.travel_search_llm = None
 
         workflow = StateGraph(GraphState)
 
@@ -219,7 +218,7 @@ class TravelGraph:
         }:
             return {"next_node": NodeStates.HOTEL_CHANGE}
         if not self.supervisor_llm:
-            self.supervisor_llm = get_llm()
+            self.supervisor_llm = get_llm(role="intent")
 
         user_message = state["messages"]
 
@@ -261,7 +260,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
 
         chain = prompt | self.supervisor_llm
         response = await chain.ainvoke({"user_message": user_message})
-        intent = response.content.strip().lower()
+        intent = response.text.strip().lower()
 
         logger.info(f"Supervisor classified intent as: {intent}")
 
@@ -495,9 +494,6 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         Returns:
             Updated state with AI response containing travel plan or clarification request
         """
-        if not self.travel_search_llm:
-            self.travel_search_llm = get_llm(streaming=False)
-
         # Get latest user message
         user_msg = next((m for m in reversed(state["messages"]) if m.type == "human"), None)
         if not user_msg:
@@ -919,7 +915,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         Returns:
             TravelSearchArgs with extracted parameters (airport codes normalized)
         """
-        extraction_llm = get_llm(streaming=False).with_structured_output(TravelSearchArgs, strict=False)
+        extraction_llm = get_llm(streaming=False, role="extraction").with_structured_output(TravelSearchArgs, strict=False)
         
         # Get current year for date parsing context
         current_year = datetime.now().year
@@ -1663,7 +1659,7 @@ Would you like me to search for different dates or another destination?"""
                 should_continue: bool = Field(description="Whether to continue processing")
                 reason: str = Field(description="Reason for the decision")
             
-            self.reflection_llm = get_llm(streaming=False).with_structured_output(ShouldContinue, strict=True)
+            self.reflection_llm = get_llm(streaming=False, role="reflection").with_structured_output(ShouldContinue, strict=True)
 
         sys_msg = SystemMessage(
             content="""Analyze the conversation to determine if the user's travel request has been addressed.

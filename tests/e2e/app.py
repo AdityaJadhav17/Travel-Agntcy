@@ -29,7 +29,6 @@ def eval_metrics():
 app.include_router(eval_router)
 
 travel_graph.supervisor_llm = RunnableLambda(lambda _: AIMessage(content="travel_search"))
-travel_graph.travel_search_llm = object()
 
 
 async def extract(context):
