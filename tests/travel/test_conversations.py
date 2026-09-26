@@ -8,12 +8,12 @@ from unittest.mock import AsyncMock
 import pytest
 import httpx
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableLambda
 
 from agents.supervisors.travel import main
 from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict, ConversationTurns
-from agents.supervisors.travel.graph.graph import TravelGraph
+from agents.supervisors.travel.graph.graph import NodeStates, TravelGraph
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 
 
@@ -318,6 +318,58 @@ def test_ambiguity_does_not_call_search(monkeypatch):
     result = asyncio.run(graph._travel_search_node({"messages": [HumanMessage(content="Portland")]}))
     assert result["messages"][0].content == "Which Portland?"
     search.assert_not_awaited()
+
+
+def test_extraction_failure_uses_saved_trip_for_next_question(monkeypatch):
+    graph = TravelGraph()
+    monkeypatch.setattr(graph, '_extract_travel_params', AsyncMock(side_effect=RuntimeError('model unavailable')))
+    saved = {'search_type': 'flight_only', 'destination': 'JFK', 'origin': 'DFW'}
+    result = asyncio.run(graph._travel_search_node({
+        'messages': [HumanMessage(content='Maybe next weekend')], 'search_params': saved,
+    }))
+    assert 'date' in result['messages'][0].content.lower()
+    assert 'origin, destination, and travel dates' not in result['messages'][0].content
+    assert result['search_params'] == saved
+
+
+def test_general_response_uses_context_and_has_safe_fallback(monkeypatch):
+    graph = TravelGraph()
+    model = AsyncMock()
+    model.ainvoke.return_value = AIMessage(content='You’re welcome! Want to adjust the Dallas to New York trip?')
+    def general_model(**kwargs):
+        assert kwargs == {}
+        return model
+    monkeypatch.setattr('agents.supervisors.travel.graph.graph.get_llm', general_model)
+    state = {
+        'messages': [HumanMessage(content='Thanks!')],
+        'search_params': {'origin': 'DFW', 'destination': 'JFK'},
+    }
+    answer = asyncio.run(graph._general_response_node(state))['messages'][0].content
+    assert 'Dallas to New York' in answer
+    prompt = model.ainvoke.await_args.args[0]
+    assert 'DFW' in prompt[0].content and 'JFK' in prompt[0].content
+    assert prompt[-1].content == 'Thanks!'
+
+    model.ainvoke.side_effect = RuntimeError('model unavailable')
+    fallback = asyncio.run(graph._general_response_node(state))['messages'][0].content
+    assert 'saved trip' in fallback
+    assert 'cheapest flight + hotel combinations' not in fallback
+
+
+def test_intent_model_failure_routes_followup_without_researching_thanks(monkeypatch):
+    graph = TravelGraph()
+    def unavailable(**_):
+        raise RuntimeError('model unavailable')
+    monkeypatch.setattr('agents.supervisors.travel.graph.graph.get_llm', unavailable)
+    saved = {'origin': 'DFW', 'destination': 'JFK'}
+    followup = asyncio.run(graph._supervisor_node({
+        'messages': [HumanMessage(content='Make it next Friday')], 'search_params': saved,
+    }))
+    assert followup['next_node'] == NodeStates.TRAVEL_SEARCH
+    thanks = asyncio.run(graph._supervisor_node({
+        'messages': [HumanMessage(content='Thanks for the flight help')], 'search_params': saved,
+    }))
+    assert thanks['next_node'] == NodeStates.GENERAL_INFO
 
 
 @pytest.mark.parametrize('start,end', [('2027-02-30', None), ('2027-10-24', '2027-10-23'), ('2027-10-24', '2027-10-24')])

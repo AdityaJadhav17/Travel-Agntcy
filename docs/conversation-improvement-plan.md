@@ -331,3 +331,16 @@ quotes can change before booking.
 Docker verification: 148 backend tests pass with 97.72% gated branch-inclusive
 coverage; frontend quality/build checks and all 28 Chromium/Firefox journeys
 pass. The ten-case scored evaluation passes across an API restart.
+
+### Conversational follow-ups and model fallbacks
+
+General turns now receive a brief response grounded in recent messages and the
+saved trip instead of repeating the same welcome script. The model is instructed
+not to invent prices, availability, or bookings, and to ask at most one question.
+If that response is unavailable, the app gives a short deterministic reply.
+Intent classification has a bounded timeout and a conservative fallback: saved-trip
+follow-ups and explicit travel requests continue to extraction; greetings and
+thanks do not trigger a search. If extraction fails, the app retains the saved
+trip and asks for the next missing detail, or asks the traveler to rephrase a
+change when the trip is already complete. These fallbacks avoid a dead-end or a
+repeated request for every trip field; they do not replace normal model parsing.
