@@ -214,6 +214,25 @@ def grounded_explanation(evaluation):
     evaluation.check(evaluation.rows[-1]["cost_proxy"]["provider_google_hotels"] == 0, "explanation makes no hotel search")
 
 
+def nearby_airports(evaluation):
+    conversation = str(uuid4())
+    start, end = future_dates()
+    initial = evaluation.turn(conversation, f"Flights only from Dallas to SBP {start} to {end}")
+    evaluation.check(initial.get("travel_result", {}).get("kind") == "flight_only", "requested airport is searched first")
+    compared = evaluation.turn(conversation, "Find cheaper flights to nearby airports to SBP")
+    result = compared.get("travel_result") or {}
+    evaluation.check(compared["trip_state"].get("destination") == "SBP", "original destination remains SBP")
+    evaluation.check(result.get("kind") == "airport_comparison", "alternative-arrival comparison returned")
+    evaluation.check(result.get("requested_fare_usd") == 529, "requested-airport fare is the baseline")
+    lax = next((option for option in result.get("airport_alternatives", [])
+                if option["arrival_airport"] == "LAX"), None)
+    evaluation.check(lax is not None and lax["savings_usd"] == 229, "cheaper LAX airfare is verified")
+    evaluation.check(lax is not None and lax["driving_miles"] is not None,
+                     "driving miles to destination city are returned when routing is available")
+    evaluation.check("Ground-transfer cost is unknown" in result.get("notice", ""),
+                     "unknown transfer cost is disclosed")
+
+
 def restart(evaluation, seed):
     continued = evaluation.turn(seed["conversation_id"], "Dallas")
     evaluation.check(continued["trip_state"].get("origin") == "DFW", "origin added after API restart")
@@ -243,6 +262,7 @@ def main():
         ("provider_failure", provider_failure),
         ("unsupported_constraints", unsupported_constraints),
         ("grounded_explanation", grounded_explanation),
+        ("nearby_airport_comparison", nearby_airports),
     ):
         evaluation.scenario(name, lambda function=function: function(evaluation))
     report = evaluation.report()

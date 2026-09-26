@@ -46,7 +46,14 @@ def search(request: Request):
             "departure_airport": {"id": origin, "time": f"{day} 10:00"},
             "arrival_airport": {"id": destination, "time": f"{day} 13:00"},
         }
-        return {"best_flights": [{"price": adults * 240 + children * 150, "departure_token": "fixture-outbound", "total_duration": 180, "flights": [flight]}]}
+        fare = {"SBP": 529, "SMX": 420, "SBA": 390, "BFL": 460,
+                "MRY": 450, "FAT": 470, "BUR": 350, "LAX": 300}.get(params["arrival_id"], 240)
+        return {"best_flights": [{"price": fare * adults + children * 150, "departure_token": "fixture-outbound", "total_duration": 180, "flights": [flight]}]}
+    if engine == "google_maps_directions":
+        latitude = float(params["start_coords"].split(",")[0])
+        miles = 105 if latitude < 35 else 145
+        return {"directions": [{"travel_mode": "Driving", "distance": round(miles * 1609.344),
+                                "duration": miles * 90}]}
     if engine == "google_hotels":
         adults, children = int(params["adults"]), int(params["children"])
         ages = params.get("children_ages", "").split(",") if children else []

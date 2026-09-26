@@ -21,6 +21,7 @@ export default function StructuredTravelResultCard({
     flight_only: "Flights",
     hotel_only: "Hotels",
     activity_only: "Things to do",
+    airport_comparison: "Nearby arrival airports",
   }[result.kind]
 
   return (
@@ -78,6 +79,45 @@ export default function StructuredTravelResultCard({
                   {stops(flight.return_flight.stops)}
                 </p>
               )}
+            </article>
+          ))}
+        </div>
+      )}
+      {result.kind === "airport_comparison" && (
+        <div className="space-y-2">
+          <p className="text-sm text-gray-200">
+            Requested airport: {result.requested_airport} · Current airfare:{" "}
+            {usd(result.requested_fare_usd ?? null)}
+          </p>
+          {result.airport_alternatives?.map((option) => (
+            <article
+              key={option.arrival_airport}
+              className="rounded-xl border border-gray-700 bg-[#252525] p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h4 className="font-semibold text-white">
+                  {option.arrival_airport} · {option.municipality}
+                </h4>
+                <p className="font-semibold text-emerald-200">
+                  {usd(option.fare_usd)} airfare
+                </p>
+              </div>
+              <p className="text-sm text-gray-300">{option.airport_name}</p>
+              <p className="mt-1 text-sm text-gray-200">
+                {option.driving_miles !== null
+                  ? `${option.driving_miles} driving miles · about ${option.driving_minutes} minutes to ${result.destination}`
+                  : `${option.straight_line_miles} straight-line miles to ${result.requested_airport} airport; driving distance unavailable`}
+              </p>
+              {option.savings_usd !== null && option.savings_usd > 0 && (
+                <p className="text-sm text-emerald-200">
+                  {usd(option.savings_usd)} lower airfare than{" "}
+                  {result.requested_airport}
+                </p>
+              )}
+              <p className="mt-1 text-xs text-gray-400">
+                {option.flight.airline} · {stops(option.flight.stops)} ·{" "}
+                {option.flight.departure_time} → {option.flight.arrival_time}
+              </p>
             </article>
           ))}
         </div>

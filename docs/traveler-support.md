@@ -1,5 +1,23 @@
 # Traveler and room constraints
 
+## Nearby arrival airports
+
+After a priced flight or trip result, choose **Compare nearby arrival airports**
+or ask for cheaper flights to nearby airports. The requested destination remains
+the reference point; the app searches up to six other scheduled-service airports
+within 200 straight-line miles and in the same country. Only actual complete USD
+flight quotes for your dates and traveler counts are compared. The requested
+airport is searched again so airfare differences use current quotes.
+
+If routing is available, results show approximate driving miles and time from
+each alternative airport to the destination city. If routing is unavailable,
+results show straight-line miles to the originally requested airport, explicitly
+labeled as such. Neither measure is a promise about your exact hotel or final
+ground route. Ground-transfer fare, rental car, tolls and other costs are not
+priced, so a lower airfare does not establish a cheaper total journey. Confirm
+route availability and all prices before booking. Airport candidates come from
+the [OurAirports snapshot](../data/README.md), which can be incomplete or stale.
+
 US7 adds `adults`, `children`, `children_ages` and `rooms` to the persisted trip.
 A new trip defaults explicitly to one adult, no children, and one room. The
 assistant preserves these values during destination/date corrections and displays

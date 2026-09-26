@@ -535,6 +535,21 @@ const App: React.FC = () => {
                                   Retry hotels
                                 </button>
                               )}
+                            {(msg.travel_result?.kind === "flight_only" ||
+                              msg.travel_result?.kind === "full_trip") &&
+                              index === conversationMessages.length - 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUserInput(
+                                      "Compare nearby arrival airports",
+                                    )
+                                  }
+                                  className="ml-2 mt-3 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
+                                >
+                                  Compare nearby arrival airports
+                                </button>
+                              )}
                           </div>
                         </div>
                       )}

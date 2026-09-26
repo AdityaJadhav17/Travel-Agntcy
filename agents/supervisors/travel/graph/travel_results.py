@@ -48,9 +48,21 @@ class ActivityCard(BaseModel):
     rating: float | None = Field(default=None, ge=0, le=5, allow_inf_nan=False)
 
 
+class AirportAlternativeCard(BaseModel):
+    arrival_airport: str = Field(min_length=3, max_length=3)
+    airport_name: str = Field(max_length=160)
+    municipality: str = Field(max_length=160)
+    straight_line_miles: int = Field(ge=0, le=2000)
+    driving_miles: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    driving_minutes: int | None = Field(default=None, ge=0)
+    fare_usd: float = Field(ge=0, allow_inf_nan=False)
+    savings_usd: float | None = Field(default=None, allow_inf_nan=False)
+    flight: FlightCard
+
+
 class TravelResult(BaseModel):
     version: Literal[1] = 1
-    kind: Literal["full_trip", "flight_only", "hotel_only", "activity_only"]
+    kind: Literal["full_trip", "flight_only", "hotel_only", "activity_only", "airport_comparison"]
     searched_at: datetime
     origin: str = Field(default="", max_length=160)
     destination: str = Field(default="", max_length=160)
@@ -63,6 +75,9 @@ class TravelResult(BaseModel):
     flights: list[FlightCard] = Field(default_factory=list, max_length=5)
     hotels: list[HotelCard] = Field(default_factory=list, max_length=5)
     activities: list[ActivityCard] = Field(default_factory=list, max_length=5)
+    requested_airport: str = Field(default="", max_length=3)
+    requested_fare_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    airport_alternatives: list[AirportAlternativeCard] = Field(default_factory=list, max_length=7)
     total_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     notice: str = Field(default="", max_length=240)
 
@@ -73,6 +88,7 @@ class TravelResult(BaseModel):
             "flight_only": (self.flights,),
             "hotel_only": (self.hotels,),
             "activity_only": (self.activities,),
+            "airport_comparison": (self.airport_alternatives,),
         }[self.kind]
         if not all(required):
             raise ValueError("A successful result needs its searched options")
@@ -153,4 +169,36 @@ def travel_result(kind, trip: TravelSearchArgs, *, flights=(), hotels=(), activi
         adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
         flights=flight_cards, hotels=hotel_cards, activities=activity_cards,
         total_usd=total, notice=clean_text(notice) if notice else "",
+    ).model_dump(mode="json")
+
+
+def airport_comparison_result(trip: TravelSearchArgs, target, quoted):
+    """Present only provider-priced, same-party itineraries for each arrival airport."""
+    baseline = next((float(price) for arrival, _, price, _ in quoted
+                     if arrival.airport.code == target.code), None)
+    alternatives = []
+    for arrival, quote, price, route in quoted:
+        airport = arrival.airport
+        airport_trip = trip.model_copy(update={"destination": airport.code})
+        alternatives.append(AirportAlternativeCard(
+            arrival_airport=airport.code,
+            airport_name=clean_text(airport.name), municipality=clean_text(airport.municipality),
+            straight_line_miles=arrival.straight_line_miles,
+            driving_miles=route["miles"] if route else None,
+            driving_minutes=route["minutes"] if route else None,
+            fare_usd=float(price),
+            savings_usd=round(baseline - float(price), 2) if baseline is not None else None,
+            flight=_flight(quote, airport_trip),
+        ))
+    alternatives.sort(key=lambda option: (option.fare_usd, option.straight_line_miles))
+    notice = ("Fares cover the requested travelers. Driving estimates end in the destination city; "
+              "straight-line miles end at the requested airport. Ground-transfer cost is unknown "
+              "and excluded, so lower airfare may not mean a cheaper journey.")
+    return TravelResult(
+        kind="airport_comparison", searched_at=datetime.now(timezone.utc),
+        origin=clean_text(trip.origin), destination=clean_text(trip.destination_city or target.municipality or target.code),
+        start_date=trip.start_date or "", end_date=trip.end_date or "",
+        adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
+        requested_airport=target.code, requested_fare_usd=baseline,
+        airport_alternatives=alternatives, notice=notice,
     ).model_dump(mode="json")

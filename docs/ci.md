@@ -58,7 +58,8 @@ retries. The process-restart probe checks retained recommendation facts, a
 selective hotel replacement and family conversation state. Dates are generated
 in the future.
 The scored conversation evaluation runs after the API restart and gates CI on
-nine deterministic scenarios. Its artifact, `.runtime/ci/conversation-eval.json`,
+ten deterministic scenarios, including nearby-airport comparisons. Its artifact,
+`.runtime/ci/conversation-eval.json`,
 includes scenario completion, incorrect-assumption checks, latency and fixture
 provider-call counts. These counts are proxies rather than live model tokens or
 provider costs.

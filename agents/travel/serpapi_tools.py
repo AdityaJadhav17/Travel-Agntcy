@@ -23,6 +23,39 @@ from agents.travel.party import TravelParty
 logger = logging.getLogger("lungo.travel.serpapi_tools")
 
 
+async def driving_route_from_airport(latitude: float, longitude: float,
+                                     destination_city: str, country: str,
+                                     region: str = "") -> dict | None:
+    """Return verified driving miles/minutes, or None when routing is unavailable."""
+    if not SERPAPI_API_KEY or not destination_city:
+        return None
+    try:
+        data = await _request_search({
+            "engine": "google_maps_directions", "api_key": SERPAPI_API_KEY,
+            "start_coords": f"{latitude},{longitude}",
+            "end_addr": ", ".join(part for part in
+                                    (destination_city, region.removeprefix(f"{country}-"), country) if part),
+            "travel_mode": "0", "distance_unit": "1",
+        })
+    except (RuntimeError, httpx.HTTPError):
+        return None
+    directions = data.get("directions")
+    if not isinstance(directions, list):
+        return None
+    for option in directions:
+        if not isinstance(option, dict):
+            continue
+        if option.get("travel_mode", "").lower() != "driving":
+            continue
+        distance, duration = option.get("distance"), option.get("duration")
+        if (isinstance(distance, (int, float)) and not isinstance(distance, bool) and
+                isinstance(duration, (int, float)) and not isinstance(duration, bool) and
+                distance > 0 and duration > 0):
+            return {"miles": round(distance / 1609.344, 1),
+                    "minutes": round(duration / 60)}
+    return None
+
+
 async def _request_search(params: dict) -> dict:
     """Never include an authenticated request URL in errors or logs."""
     try:

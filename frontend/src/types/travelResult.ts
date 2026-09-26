@@ -29,9 +29,26 @@ export interface ActivityCard {
   rating: number | null
 }
 
+export interface AirportAlternativeCard {
+  arrival_airport: string
+  airport_name: string
+  municipality: string
+  straight_line_miles: number
+  driving_miles: number | null
+  driving_minutes: number | null
+  fare_usd: number
+  savings_usd: number | null
+  flight: FlightCard
+}
+
 export interface TravelResult {
   version: 1
-  kind: "full_trip" | "flight_only" | "hotel_only" | "activity_only"
+  kind:
+    | "full_trip"
+    | "flight_only"
+    | "hotel_only"
+    | "activity_only"
+    | "airport_comparison"
   searched_at: string
   origin: string
   destination: string
@@ -44,6 +61,9 @@ export interface TravelResult {
   flights: FlightCard[]
   hotels: HotelCard[]
   activities: ActivityCard[]
+  requested_airport?: string
+  requested_fare_usd?: number | null
+  airport_alternatives?: AirportAlternativeCard[]
   total_usd: number | null
   notice: string
 }
@@ -108,6 +128,29 @@ const activity = (value: unknown): value is ActivityCard => {
   )
 }
 
+const airportAlternative = (
+  value: unknown,
+): value is AirportAlternativeCard => {
+  if (!record(value)) return false
+  const hasDriving = value.driving_miles !== null
+  return (
+    text(value.arrival_airport) &&
+    /^[A-Z]{3}$/.test(value.arrival_airport) &&
+    text(value.airport_name) &&
+    text(value.municipality) &&
+    count(value.straight_line_miles) &&
+    (value.driving_miles === null || price(value.driving_miles)) &&
+    (value.driving_minutes === null || count(value.driving_minutes)) &&
+    hasDriving === (value.driving_minutes !== null) &&
+    typeof value.fare_usd === "number" &&
+    price(value.fare_usd) &&
+    (value.savings_usd === null ||
+      (typeof value.savings_usd === "number" &&
+        Number.isFinite(value.savings_usd))) &&
+    flight(value.flight)
+  )
+}
+
 /** Unknown versions and malformed saved data use the existing text renderer. */
 export function parseTravelResult(value: unknown): TravelResult | null {
   if (!record(value) || value.version !== 1) return null
@@ -115,7 +158,8 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     value.kind !== "full_trip" &&
     value.kind !== "flight_only" &&
     value.kind !== "hotel_only" &&
-    value.kind !== "activity_only"
+    value.kind !== "activity_only" &&
+    value.kind !== "airport_comparison"
   )
     return null
   if (
@@ -152,6 +196,17 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     (value.kind === "flight_only" && !value.flights.length) ||
     (value.kind === "hotel_only" && !value.hotels.length) ||
     (value.kind === "activity_only" && !value.activities.length)
+  )
+    return null
+  if (
+    value.kind === "airport_comparison" &&
+    (!text(value.requested_airport) ||
+      !/^[A-Z]{3}$/.test(value.requested_airport) ||
+      !price(value.requested_fare_usd) ||
+      !Array.isArray(value.airport_alternatives) ||
+      value.airport_alternatives.length < 1 ||
+      value.airport_alternatives.length > 7 ||
+      !value.airport_alternatives.every(airportAlternative))
   )
     return null
   return value as unknown as TravelResult

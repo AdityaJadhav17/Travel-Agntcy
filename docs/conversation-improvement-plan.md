@@ -81,15 +81,16 @@ below or change the configured model.
   chats, restart recovery, retry conflicts, provider failures, and unsupported
   constraints. Track task completion, incorrect assumptions, latency, and tool cost.
 
-### Later — Nearby arrival-airport comparison
+### Phase 5 — Nearby arrival-airport comparison
 
 - **US15, travelers:** When a requested flight is expensive, I can compare flights
   to other airports near my actual destination and see how far each airport is
   from that destination. Acceptance: search a bounded set of eligible arrival
-  airports for the same dates and traveler party, show each airfare alongside
-  approximate ground-transfer miles, time and cost when available, and rank the
-  whole journey rather than airfare alone. Label driving versus straight-line
-  distances and never present an alternative airport as the requested airport.
+  airports for the same dates and traveler party, verify each itinerary and USD
+  fare, and show driving miles/time to the destination city when routing is
+  available. Otherwise label straight-line miles to the requested airport.
+  Never present a lower airfare as a lower whole-trip cost when ground transfer
+  is unpriced, or replace the requested destination with an alternative airport.
 
 ## Implementation approach
 
@@ -291,17 +292,42 @@ and previous conversation behavior.
 
 ### Scored conversation evaluation (US14)
 
-The isolated CI stack now scores nine deterministic API/agent/provider journeys:
+The isolated CI stack now scores ten deterministic API/agent/provider journeys:
 restart recovery, multi-turn correction, ambiguous dates, chat isolation, long
 context, concurrent retry conflicts, transient provider failure, unsupported
-constraints, and grounded explanations. It checks explicit facts instead of
+constraints, grounded explanations, and nearby-airport comparisons. It checks explicit facts instead of
 matching entire model prose, and fails CI if any scenario fails. The JSON artifact
 records task completion, failed assumption checks, per-turn and p95 latency,
 fixture extraction counts, and provider HTTP call counts. The last two are tool
 cost proxies, not token usage or money. The model extractor is deterministic in
 this suite; live-model language accuracy and real-provider behavior still need
 separate measurement before claiming an improvement there.
-The initial Docker baseline passes 9/9 scenarios with zero failed fact checks;
-median turn latency is 416 ms and p95 is 467 ms. The run recorded 37 fixture
-extractions and 21 provider HTTP calls. These values are a baseline for this
-fixture and CI host, not production service-level targets.
+The expanded Docker baseline passes 10/10 scenarios with zero failed fact
+checks; median turn latency is 415 ms and p95 is 455 ms. The run recorded 39
+fixture extractions and 43 provider HTTP calls. These values are a baseline for
+this fixture and CI host, not production service-level targets.
+
+### Nearby arrival airports (US15)
+
+After a flight or full-trip result, the UI offers **Compare nearby arrival
+airports**. A natural-language request for cheaper flights to nearby airports
+uses the same path. The requested airport stays in conversation state while the
+supervisor searches it again alongside up to six scheduled-service airports
+within 200 straight-line miles in the same country. A versioned OurAirports
+snapshot supplies candidates; only complete USD provider itineraries for the
+same dates and travelers appear in results. Round-trip comparisons require a
+return itinerary to the original origin. Flight searches run with a concurrency
+limit of three and a 20-second per-search timeout.
+
+The cards show the current requested-airport fare, alternative fares, and
+verified airfare differences. SerpAPI directions supply driving miles and time
+to the destination city when available. Otherwise the cards explicitly show
+straight-line miles to the requested airport. Ground-transfer prices are not
+available, so the list is ordered by airfare and does not claim a cheaper total
+journey. The comparison remains in chat history after reload. The airport
+snapshot is public-domain data with no guarantee of accuracy; flight and route
+quotes can change before booking.
+
+Docker verification: 148 backend tests pass with 97.72% gated branch-inclusive
+coverage; frontend quality/build checks and all 28 Chromium/Firefox journeys
+pass. The ten-case scored evaluation passes across an API restart.

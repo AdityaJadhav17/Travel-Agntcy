@@ -123,6 +123,45 @@ test("unknown result versions fall back to the narrative", async ({ page }) => {
   ).toHaveCount(0)
 })
 
+test("nearby arrival airports compare real fares and ground distance", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const initial = await send(
+    page,
+    `Flights only from Dallas to SBP ${start} to ${end}`,
+  )
+  expect(initial.travel_result.kind).toBe("flight_only")
+  await expect(
+    page.getByRole("button", { name: "Compare nearby arrival airports" }),
+  ).toBeVisible()
+
+  const compared = await send(
+    page,
+    "Can you find cheaper flights to nearby airports to SBP?",
+  )
+  expect(compared.trip_state.destination).toBe("SBP")
+  expect(compared.travel_result).toMatchObject({
+    kind: "airport_comparison",
+    requested_airport: "SBP",
+    requested_fare_usd: 529,
+  })
+  const lax = compared.travel_result.airport_alternatives.find(
+    (option: { arrival_airport: string }) => option.arrival_airport === "LAX",
+  )
+  expect(lax).toMatchObject({ fare_usd: 300, savings_usd: 229 })
+  expect(lax.driving_miles).toBeGreaterThan(0)
+  const cards = page.getByRole("region", { name: "Travel results" })
+  await expect(cards.getByText(/LAX · Los Angeles/)).toBeVisible()
+  await expect(cards.getByText(/driving miles/).first()).toBeVisible()
+  await expect(cards.getByText(/lower airfare than SBP/).first()).toBeVisible()
+  await page.reload()
+  await page
+    .getByRole("button", { name: /Flights only from Dallas to SBP/ })
+    .click()
+  await expect(cards.getByText(/LAX · Los Angeles/)).toBeVisible()
+})
+
 test("hotel failure keeps flights and retries hotels after reload", async ({
   page,
 }) => {
