@@ -10,17 +10,31 @@ import re
 
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
+from fastapi import APIRouter
 
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.main import app, travel_graph
 
 __all__ = ["app"]
 
+eval_router = APIRouter()
+extraction_calls = 0
+
+
+@eval_router.get("/__eval/metrics")
+def eval_metrics():
+    return {"extraction_calls": extraction_calls}
+
+
+app.include_router(eval_router)
+
 travel_graph.supervisor_llm = RunnableLambda(lambda _: AIMessage(content="travel_search"))
 travel_graph.travel_search_llm = object()
 
 
 async def extract(context):
+    global extraction_calls
+    extraction_calls += 1
     data = json.loads(context)
     params = dict(data["saved_trip"])
     prompt = data["latest_user_message"].lower()
@@ -61,6 +75,8 @@ async def extract(context):
     if "failure" in prompt:
         params.update(search_type="hotel_only", location="Failure City")
     params["clarification_question"] = ""
+    if "early october" in prompt:
+        params["clarification_question"] = "Which dates in October do you mean?"
     return TravelSearchArgs(**params)
 
 

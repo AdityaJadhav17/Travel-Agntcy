@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request, HTTPException
 
 app = FastAPI()
 transient_queries = set()
+request_counts = {"google_flights": 0, "google_hotels": 0, "other": 0}
 
 
 @app.get("/health")
@@ -14,10 +15,16 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/__eval/metrics")
+def eval_metrics():
+    return {"provider_calls": dict(request_counts)}
+
+
 @app.get("/search")
 def search(request: Request):
     params = request.query_params
     engine = params.get("engine")
+    request_counts[engine if engine in request_counts else "other"] += 1
     if "failure" in params.get("q", "").lower():
         raise HTTPException(503, "Test provider unavailable")
     if engine == "google_hotels":

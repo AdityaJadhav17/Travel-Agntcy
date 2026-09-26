@@ -81,6 +81,16 @@ below or change the configured model.
   chats, restart recovery, retry conflicts, provider failures, and unsupported
   constraints. Track task completion, incorrect assumptions, latency, and tool cost.
 
+### Later — Nearby arrival-airport comparison
+
+- **US15, travelers:** When a requested flight is expensive, I can compare flights
+  to other airports near my actual destination and see how far each airport is
+  from that destination. Acceptance: search a bounded set of eligible arrival
+  airports for the same dates and traveler party, show each airfare alongside
+  approximate ground-transfer miles, time and cost when available, and rank the
+  whole journey rather than airfare alone. Label driving versus straight-line
+  distances and never present an alternative airport as the requested airport.
+
 ## Implementation approach
 
 Use a small SQLite conversation repository with atomic revision checks for the
@@ -135,8 +145,8 @@ the requested traveler selection in one hotel room (US7 below). Removing the bud
 US7 is implemented for supported single-room searches, with explicit clarification
 for multi-room requests and infant flight seating. Adults, children, ages at travel,
 and requested rooms persist in conversation state. Provider adapters receive
-validated counts, and quote metadata must match the requested party. US8 and
-US9 are described below; phases 3–4 remain planned. See
+validated counts, and quote metadata must match the requested party. US8–US12
+and US14 are described below; multi-user US13 remains deferred. See
 [traveler support](traveler-support.md) for boundaries.
 
 US7 validation: 109 backend tests, 14 Chromium/Firefox journeys, the family
@@ -278,3 +288,20 @@ coverage across the gated modules; Ruff and frontend lint, formatting, types
 and production build pass. All 26 Chromium/Firefox browser journeys pass,
 including progress, Stop, transient hotel failure, retry after browser reload,
 and previous conversation behavior.
+
+### Scored conversation evaluation (US14)
+
+The isolated CI stack now scores nine deterministic API/agent/provider journeys:
+restart recovery, multi-turn correction, ambiguous dates, chat isolation, long
+context, concurrent retry conflicts, transient provider failure, unsupported
+constraints, and grounded explanations. It checks explicit facts instead of
+matching entire model prose, and fails CI if any scenario fails. The JSON artifact
+records task completion, failed assumption checks, per-turn and p95 latency,
+fixture extraction counts, and provider HTTP call counts. The last two are tool
+cost proxies, not token usage or money. The model extractor is deterministic in
+this suite; live-model language accuracy and real-provider behavior still need
+separate measurement before claiming an improvement there.
+The initial Docker baseline passes 9/9 scenarios with zero failed fact checks;
+median turn latency is 416 ms and p95 is 467 ms. The run recorded 37 fixture
+extractions and 21 provider HTTP calls. These values are a baseline for this
+fixture and CI host, not production service-level targets.

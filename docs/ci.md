@@ -57,6 +57,11 @@ totals, retained recommendation explanations, and both overlapping and completed
 retries. The process-restart probe checks retained recommendation facts, a
 selective hotel replacement and family conversation state. Dates are generated
 in the future.
+The scored conversation evaluation runs after the API restart and gates CI on
+nine deterministic scenarios. Its artifact, `.runtime/ci/conversation-eval.json`,
+includes scenario completion, incorrect-assumption checks, latency and fixture
+provider-call counts. These counts are proxies rather than live model tokens or
+provider costs.
 No test uses a real user's conversation or the developer's conversation volume.
 
 ## Run locally with Docker
@@ -76,9 +81,11 @@ docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks 
 docker compose -p travel-ci -f compose.ci.yaml up -d --no-build --wait --wait-timeout 180 ui
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps e2e
 docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/check_persistence.py seed
+docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/evaluate_conversations.py seed
 docker compose -p travel-ci -f compose.ci.yaml restart api
 docker compose -p travel-ci -f compose.ci.yaml up -d --no-build --wait --wait-timeout 120 api
 docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/check_persistence.py verify
+docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/evaluate_conversations.py verify > .runtime/ci/conversation-eval.json
 ```
 
 Audits require network access to advisory registries (outside the internal E2E

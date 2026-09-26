@@ -136,11 +136,26 @@ jobs:
         run: docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps e2e
       - name: Save a conversation before process restart
         run: docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/check_persistence.py seed
+      - name: Seed scored conversation evaluation before process restart
+        run: docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/evaluate_conversations.py seed
       - name: Restart API and verify persisted context
         run: |
           docker compose -p travel-ci -f compose.ci.yaml restart api
           docker compose -p travel-ci -f compose.ci.yaml up -d --no-build --wait --wait-timeout 120 api
           docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/check_persistence.py verify
+      - name: Score conversation journeys and enforce the evaluation gate
+        run: |
+          docker compose -p travel-ci -f compose.ci.yaml exec -T api uv run --no-sync python scripts/ci/evaluate_conversations.py verify > .runtime/ci/conversation-eval.json
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          result = json.loads(Path('.runtime/ci/conversation-eval.json').read_text())
+          score = result['task_completion']
+          print(f"### Conversation evaluation: {score['passed']}/{score['total']} scenarios")
+          print(f"Incorrect assumption checks: {result['incorrect_assumptions']}; "
+                f"p95 turn latency: {result['latency_ms']['p95']} ms")
+          print(f"Fixture tool-call proxy: {result['tool_cost_proxy']}")
+          PY
       - name: Collect service logs
         if: always()
         run: |
@@ -153,6 +168,7 @@ jobs:
           path: |
             .runtime/ci/playwright
             .runtime/ci/playwright-report
+            .runtime/ci/conversation-eval.json
             .runtime/ci/services.log
           include-hidden-files: true
           retention-days: 14
