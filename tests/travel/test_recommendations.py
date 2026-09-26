@@ -196,3 +196,49 @@ def test_mixed_change_request_does_not_take_exact_explanation_shortcut():
     graph.supervisor_llm = RunnableLambda(lambda _: AIMessage(content="travel_search"))
     result = asyncio.run(graph._supervisor_node({"messages": [HumanMessage(content="Why this one? Change the destination to Boston.")]}))
     assert result["next_node"] == "travel_search"
+
+
+def test_mixed_explanation_and_change_answers_both_without_stale_selection(monkeypatch):
+    graph = TravelGraph()
+    graph.supervisor_llm = RunnableLambda(lambda _: AIMessage(content="explain_recommendation"))
+    params = trip(destination="BOS", destination_city="Boston", start_date=None, end_date=None)
+    monkeypatch.setattr(graph, "_extract_travel_params", AsyncMock(return_value=params))
+    saved = snapshot()
+    answer = asyncio.run(graph.serve_conversation(
+        "Why this one? Change the destination to Boston, dates undecided.",
+        [], trip().model_dump(), saved,
+    ))
+    assert "USD 540.00" in answer["response"]
+    assert "date" in answer["response"].lower()
+    assert answer["trip_state"]["destination"] == "BOS"
+    assert answer["recommendation"] is None
+
+
+def test_cheaper_dates_question_preserves_quote_until_dates_are_given(monkeypatch):
+    graph = TravelGraph()
+    extractor = AsyncMock(side_effect=AssertionError("No search without specific dates"))
+    monkeypatch.setattr(graph, "_extract_travel_params", extractor)
+    saved = snapshot()
+    answer = asyncio.run(graph.serve_conversation(
+        "Why this one, and show me cheaper dates?", [], trip().model_dump(), saved,
+    ))
+    assert "USD 540.00" in answer["response"]
+    assert "Which departure and return dates" in answer["response"]
+    assert answer["recommendation"] == saved
+    extractor.assert_not_awaited()
+    assert not graph._needs_date_choice("Try cheaper dates on November 2-5", trip().model_dump())
+
+
+def test_mixed_explanation_and_simple_hotel_change_uses_swap_route():
+    graph = TravelGraph()
+    graph.supervisor_llm = RunnableLambda(lambda _: AIMessage(content="change_hotel"))
+    result = asyncio.run(graph._supervisor_node({
+        "messages": [HumanMessage(content="Why this trip, and change the hotel?")],
+        "search_params": trip().model_dump(), "recommendation": snapshot(),
+    }))
+    assert result["next_node"] == "change_hotel"
+    assert "USD 540.00" in result["explanation_prefix"]
+    assert not graph._mixed_explanation_request("show me why this trip was chosen")
+    assert not graph._needs_date_choice(
+        "show cheaper dates", trip(search_type="hotel_only").model_dump(),
+    )

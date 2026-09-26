@@ -63,6 +63,7 @@ class NodeStates:
     EXPLAIN = "explain_recommendation"
     HOTEL_CHANGE = "change_hotel"
     HOTEL_RETRY = "retry_hotels"
+    DATE_CLARIFY = "clarify_dates"
     REFLECTION = "reflection"
 
 
@@ -83,6 +84,7 @@ class GraphState(MessagesState):
     travel_result: dict | None = None
     partial_search: dict | None = None
     retry_hotels: bool = False
+    explanation_prefix: str = ""
 
 
 @agent(name="travel_agent")
@@ -147,6 +149,7 @@ class TravelGraph:
         workflow.add_node(NodeStates.EXPLAIN, self._explain_recommendation_node)
         workflow.add_node(NodeStates.HOTEL_CHANGE, self._change_hotel_node)
         workflow.add_node(NodeStates.HOTEL_RETRY, self._retry_hotels_node)
+        workflow.add_node(NodeStates.DATE_CLARIFY, self._clarify_dates_node)
         workflow.add_node(NodeStates.REFLECTION, self._reflection_node)
 
         # --- 2. Define the Agentic Workflow ---
@@ -162,6 +165,7 @@ class TravelGraph:
                 NodeStates.EXPLAIN: NodeStates.EXPLAIN,
                 NodeStates.HOTEL_CHANGE: NodeStates.HOTEL_CHANGE,
                 NodeStates.HOTEL_RETRY: NodeStates.HOTEL_RETRY,
+                NodeStates.DATE_CLARIFY: NodeStates.DATE_CLARIFY,
             },
         )
 
@@ -173,6 +177,7 @@ class TravelGraph:
         workflow.add_edge(NodeStates.EXPLAIN, END)
         workflow.add_edge(NodeStates.HOTEL_CHANGE, END)
         workflow.add_edge(NodeStates.HOTEL_RETRY, END)
+        workflow.add_edge(NodeStates.DATE_CLARIFY, END)
 
         # Reflection decides whether to continue or end
         workflow.add_conditional_edges(
@@ -210,6 +215,10 @@ class TravelGraph:
         }:
             return {"next_node": NodeStates.EXPLAIN}
         normalized = " ".join(re.sub(r"[,?.!]", " ", latest.lower()).split()) if isinstance(latest, str) else ""
+        mixed = self._mixed_explanation_request(normalized)
+        explanation = explain_recommendation(state.get("recommendation")) if mixed else ""
+        if self._needs_date_choice(normalized, state.get("search_params")):
+            return {"next_node": NodeStates.DATE_CLARIFY, "explanation_prefix": explanation}
         if normalized in {
             "keep the flights change the hotel", "keep my flights change the hotel",
             "keep the flight change the hotel", "keep my flight change the hotel",
@@ -229,6 +238,8 @@ Based on the user's message, respond with ONE of these options:
   Use only for a simple hotel swap without a new preference or changed constraint.
   If the user changes dates, party, destination, budget or requests a specific
   hotel/amenity, use travel_search so those details can be extracted first.
+  A request that also asks why the saved trip was chosen is still change_hotel
+  when the only action is a simple hotel swap.
 - 'explain_recommendation' - only when the user asks why a previous trip was chosen,
   how its saved cost was calculated, or what criteria selected that recommendation.
   Do not use this for new searches, changed constraints, refreshed availability,
@@ -267,16 +278,17 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
 
         logger.info(f"Supervisor classified intent as: {intent}")
 
-        if intent == NodeStates.EXPLAIN:
+        if intent == NodeStates.EXPLAIN and not mixed:
             return {"next_node": NodeStates.EXPLAIN}
         if intent == NodeStates.HOTEL_CHANGE:
-            return {"next_node": NodeStates.HOTEL_CHANGE}
-        if intent == NodeStates.TRAVEL_SEARCH or (intent not in {
+            return {"next_node": NodeStates.HOTEL_CHANGE, "explanation_prefix": explanation}
+        if mixed or intent == NodeStates.TRAVEL_SEARCH or (intent not in {
             NodeStates.GENERAL_INFO, NodeStates.EXPLAIN, NodeStates.HOTEL_CHANGE,
         } and self._fallback_travel_intent(normalized, state.get("search_params"))):
             # A new search or clarification invalidates the previous selection.
             # Never explain an old destination/party as the newly requested trip.
-            return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None, "partial_search": None}
+            return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None,
+                    "partial_search": None, "explanation_prefix": explanation}
         else:
             return {"next_node": NodeStates.GENERAL_INFO}
 
@@ -291,6 +303,51 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             r"\b(flight|flights|fly|trip|travel|hotel|hotels|stay|vacation|"
             r"destination|airport|airports|activities|attractions|visit)\b", message,
         ))
+
+    @staticmethod
+    def _mixed_explanation_request(message: str) -> bool:
+        asks_why = bool(re.search(
+            r"\b(?:why (?:this|that|did you choose|was this chosen)|"
+            r"explain (?:this|that|the recommendation)|how was (?:that|the) (?:price|total) calculated)\b",
+            message,
+        ))
+        asks_action = bool(re.search(
+            r"\b(?:change|switch|swap|replace|find|search|try|compare|"
+            r"update|move|cheaper)\b"
+            r"|\bshow\b.{0,30}\b(?:other|another|different|cheaper|flights?|"
+            r"hotels?|dates?|options?)\b", message,
+        ))
+        return asks_why and asks_action
+
+    @staticmethod
+    def _needs_date_choice(message: str, saved_trip: dict | None) -> bool:
+        if (not saved_trip or not saved_trip.get("start_date") or
+                saved_trip.get("search_type", "full_trip") not in ("flight_only", "full_trip")):
+            return False
+        message = message.lower()
+        wants_alternatives = re.search(
+            r"\b(?:cheaper|different|other|flexible|alternate|alternative)\s+dates?\b"
+            r"|\b(?:what|which|when).{0,24}\bdates?\b.{0,20}\bcheap",
+            message,
+        )
+        if not wants_alternatives:
+            return False
+        has_specific_date = re.search(
+            r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|"
+            r"jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|"
+            r"dec(?:ember)?|tomorrow|next (?:mon|tues|wednes|thurs|fri|satur|sun)day)\b"
+            r"|\b\d{4}-\d{1,2}-\d{1,2}\b|\b\d{1,2}/\d{1,2}\b"
+            r"|\b(?:a|one|two|three|\d+)\s+(?:days?|weeks?)\s+(?:later|earlier)\b",
+            message,
+        )
+        return has_specific_date is None
+
+    @staticmethod
+    def _clarify_dates_node(state: GraphState) -> dict:
+        response = ("I can compare flights on specific alternative dates, but I can't scan an entire "
+                    "flexible-date calendar. Which departure and return dates would you like me to check? "
+                    "For a one-way trip, just give me the departure date.")
+        return {"messages": [AIMessage(content=response)], "full_response": response}
 
     @staticmethod
     def _nearby_arrival_request(message: str) -> bool:
@@ -1770,7 +1827,10 @@ Set should_continue to FALSE if:
         })
         for message in reversed(result.get("messages", [])):
             if isinstance(message, AIMessage) and message.content.strip():
-                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip),
+                response = message.content.strip()
+                if explanation := result.get("explanation_prefix"):
+                    response = explanation + "\n\n---\n\n" + response
+                return {"response": response, "trip_state": result.get("search_params", trip),
                         "budget_assessment": result.get("budget_assessment"),
                         "recommendation": result.get("recommendation"),
                         "travel_result": result.get("travel_result"),

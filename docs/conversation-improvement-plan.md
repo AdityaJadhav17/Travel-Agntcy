@@ -344,3 +344,16 @@ thanks do not trigger a search. If extraction fails, the app retains the saved
 trip and asks for the next missing detail, or asks the traveler to rephrase a
 change when the trip is already complete. These fallbacks avoid a dead-end or a
 repeated request for every trip field; they do not replace normal model parsing.
+
+### Mixed explanation and date-change turns
+
+When a traveler asks why a saved full-trip recommendation was selected and also
+asks to change it, the response explains the saved quote from retained facts,
+then handles the new request. A change or clarification still clears the old
+selection so it cannot be mistaken for the new quote. A simple hotel swap keeps
+its focused replacement route. Broad requests for "cheaper dates" pause before
+provider searches and ask for specific alternative dates; the saved trip and
+previous quote remain available until the traveler supplies them. The app does
+not claim to scan a flexible-date calendar or know the cheapest dates without
+checking actual quotes. Explanations still require a saved full-trip selection;
+flight-only lists do not yet retain a selected quote for this purpose.
