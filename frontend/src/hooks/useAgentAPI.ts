@@ -20,7 +20,14 @@ interface ApiResponse {
   trip_state?: Record<string, unknown>
   budget_assessment?: BudgetAssessment | null
   travel_result?: TravelResult | null
+  retry_hotels?: boolean
 }
+
+export type TravelStreamEvent =
+  | { type: "status"; component: string; message: string }
+  | { type: "result"; component: string; travel_result: TravelResult }
+  | { type: "error"; component: string; message: string }
+  | { type: "text"; text: string }
 
 interface UseAgentAPIReturn {
   loading: boolean
@@ -29,6 +36,13 @@ interface UseAgentAPIReturn {
     pattern?: string,
     conversationId?: string,
   ) => Promise<ApiResponse>
+  streamMessage: (
+    prompt: string,
+    pattern: string,
+    conversationId: string,
+    onEvent: (event: TravelStreamEvent) => void,
+  ) => Promise<ApiResponse>
+  cancelStream: (conversationId: string) => void
   deleteConversation: (conversationId: string) => Promise<void>
   sendMessageWithCallback: (
     prompt: string,
@@ -51,6 +65,7 @@ interface UseAgentAPIReturn {
 export const useAgentAPI = (): UseAgentAPIReturn => {
   const [loading, setLoading] = useState<boolean>(false)
   const abortRef = useRef<AbortController | null>(null)
+  const streamControllers = useRef(new Map<string, AbortController>())
   const requestIdRef = useRef<number>(0)
 
   const cancel = () => {
@@ -60,11 +75,17 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     requestIdRef.current += 1
   }
 
+  const cancelStream = (conversationId: string) => {
+    streamControllers.current.get(conversationId)?.abort()
+  }
+
   useEffect(() => {
+    const controllers = streamControllers.current
     return () => {
       if (abortRef.current) {
         abortRef.current.abort()
       }
+      controllers.forEach((controller) => controller.abort())
     }
   }, [])
 
@@ -113,6 +134,85 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     } finally {
       if (requestIdRef.current === myRequestId) {
         setLoading(false)
+      }
+    }
+  }
+
+  const streamMessage = async (
+    prompt: string,
+    pattern: string,
+    conversationId: string,
+    onEvent: (event: TravelStreamEvent) => void,
+  ): Promise<ApiResponse> => {
+    const controller = new AbortController()
+    streamControllers.current.set(conversationId, controller)
+    const requestId = uuid()
+    let answer: ApiResponse | null = null
+    let streamError: Error | null = null
+    let buffer = ""
+    const processLine = (line: string) => {
+      if (!line.trim()) return
+      const event = JSON.parse(line) as Record<string, unknown>
+      if (event.type === "done") {
+        const result = event.result as ApiResponse | undefined
+        if (!result || typeof result.response !== "string") {
+          throw new Error("The travel service returned an invalid result.")
+        }
+        answer = result
+      } else if (
+        event.type === "status" ||
+        event.type === "result" ||
+        event.type === "text" ||
+        event.type === "error"
+      ) {
+        if (event.type === "error" && event.component === "request") {
+          streamError = new Error(
+            String(event.message || "Travel search failed."),
+          )
+        } else {
+          onEvent(event as TravelStreamEvent)
+        }
+      }
+    }
+    try {
+      const response = await fetch(
+        `${getApiUrlForPattern(pattern)}/agent/prompt/stream`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt,
+            conversation_id: conversationId,
+            request_id: requestId,
+          }),
+          signal: controller.signal,
+          credentials: isLocalDev ? "same-origin" : "include",
+        },
+      )
+      if (!response.ok || !response.body) {
+        throw new Error(`Travel service returned HTTP ${response.status}.`)
+      }
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      while (true) {
+        const { value, done } = await reader.read()
+        buffer += decoder.decode(value, { stream: !done })
+        let end = buffer.indexOf("\n")
+        while (end !== -1) {
+          processLine(buffer.slice(0, end))
+          buffer = buffer.slice(end + 1)
+          end = buffer.indexOf("\n")
+        }
+        if (done) break
+      }
+      if (buffer.trim()) processLine(buffer)
+      if (streamError) throw streamError
+      if (!answer)
+        throw new Error("The travel service ended before sending a result.")
+      return answer
+    } finally {
+      if (streamControllers.current.get(conversationId) === controller) {
+        streamControllers.current.delete(conversationId)
       }
     }
   }
@@ -268,6 +368,8 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     deleteConversation,
     loading,
     sendMessage,
+    streamMessage,
+    cancelStream,
     sendMessageWithCallback,
     cancel,
   }

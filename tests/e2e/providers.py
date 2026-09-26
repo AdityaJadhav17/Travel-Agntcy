@@ -1,10 +1,12 @@
 """Deterministic HTTP substitute for SerpAPI, only in the isolated CI stack."""
 
 from datetime import date
+import time
 
 from fastapi import FastAPI, Request, HTTPException
 
 app = FastAPI()
+transient_queries = set()
 
 
 @app.get("/health")
@@ -18,6 +20,13 @@ def search(request: Request):
     engine = params.get("engine")
     if "failure" in params.get("q", "").lower():
         raise HTTPException(503, "Test provider unavailable")
+    if engine == "google_hotels":
+        query = params.get("q", "").lower()
+        if query.startswith("transient-") and query not in transient_queries:
+            transient_queries.add(query)
+            raise HTTPException(503, "Test hotel provider temporarily unavailable")
+        if query.startswith("slow-"):
+            time.sleep(3)
     if engine == "google_flights":
         adults, children = int(params["adults"]), int(params["children"])
         inbound = bool(params.get("departure_token"))

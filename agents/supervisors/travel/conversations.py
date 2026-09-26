@@ -57,6 +57,7 @@ class ConversationStore:
         )""")
         db.execute("CREATE TABLE IF NOT EXISTS deleted_conversations (id TEXT PRIMARY KEY)")
         db.execute("CREATE TABLE IF NOT EXISTS conversation_recommendations (id TEXT PRIMARY KEY, facts TEXT NOT NULL)")
+        db.execute("CREATE TABLE IF NOT EXISTS conversation_partial_searches (id TEXT PRIMARY KEY, facts TEXT NOT NULL)")
         try:
             with db:
                 yield db
@@ -72,8 +73,10 @@ class ConversationStore:
             db.execute("INSERT OR IGNORE INTO conversations VALUES (?, 0, '[]', '{}', '{}')", (conversation_id,))
             row = db.execute("SELECT revision, messages, trip, requests FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
             recommendation = db.execute("SELECT facts FROM conversation_recommendations WHERE id = ?", (conversation_id,)).fetchone()
+            partial_search = db.execute("SELECT facts FROM conversation_partial_searches WHERE id = ?", (conversation_id,)).fetchone()
         return {"revision": row[0], "messages": json.loads(row[1]), "trip": json.loads(row[2]), "requests": json.loads(row[3]),
-                "recommendation": json.loads(recommendation[0]) if recommendation else None}
+                "recommendation": json.loads(recommendation[0]) if recommendation else None,
+                "partial_search": json.loads(partial_search[0]) if partial_search else None}
 
     def save(self, conversation_id, snapshot, request_id, prompt, result):
         messages = (snapshot["messages"] + [
@@ -94,9 +97,15 @@ class ConversationStore:
                 db.execute("DELETE FROM conversation_recommendations WHERE id = ?", (conversation_id,))
             else:
                 db.execute("INSERT OR REPLACE INTO conversation_recommendations VALUES (?, ?)", (conversation_id, json.dumps(recommendation)))
+            partial_search = result.get("partial_search", snapshot.get("partial_search"))
+            if partial_search is None:
+                db.execute("DELETE FROM conversation_partial_searches WHERE id = ?", (conversation_id,))
+            else:
+                db.execute("INSERT OR REPLACE INTO conversation_partial_searches VALUES (?, ?)", (conversation_id, json.dumps(partial_search)))
 
     def delete(self, conversation_id):
         with self.connect() as db:
             db.execute("INSERT OR IGNORE INTO deleted_conversations VALUES (?)", (conversation_id,))
             db.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
             db.execute("DELETE FROM conversation_recommendations WHERE id = ?", (conversation_id,))
+            db.execute("DELETE FROM conversation_partial_searches WHERE id = ?", (conversation_id,))

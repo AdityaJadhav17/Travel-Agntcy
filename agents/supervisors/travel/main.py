@@ -16,12 +16,13 @@ by searching SerpAPI and applying timing constraints.
 
 import logging
 import json
+import asyncio
 from pathlib import Path
 from uuid import UUID
 from asyncio import to_thread
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
@@ -30,6 +31,7 @@ from agntcy_app_sdk.factory import AgntcyFactory
 from ioa_observe.sdk.tracing import session_start
 
 from agents.supervisors.travel.graph.graph import TravelGraph
+from agents.supervisors.travel.graph.progress import progress_sink
 from agents.supervisors.travel.graph import shared
 from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict, ConversationTurns
 from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED
@@ -121,6 +123,30 @@ async def get_capabilities():
     }
 
 
+async def _conversation_response(request: PromptRequest, session_id: str):
+    if not request.conversation_id:
+        result = await travel_graph.serve(request.prompt)
+        return {"response": result, "session_id": session_id}
+    if not request.request_id:
+        raise HTTPException(422, "request_id is required for a conversation turn")
+    conversation_id = str(request.conversation_id)
+    request_id = str(request.request_id)
+    async with conversation_turns.acquire(conversation_id):
+        saved = await to_thread(conversation_store.load, conversation_id)
+        cached = saved["requests"].get(request_id)
+        if cached:
+            if cached["prompt"] != request.prompt:
+                raise HTTPException(409, "This request ID was already used for another message")
+            return cached["result"]
+        turn = await travel_graph.serve_conversation(
+            request.prompt, saved["messages"], saved["trip"],
+            saved["recommendation"], saved["partial_search"],
+        )
+        result = {**turn, "conversation_id": conversation_id, "session_id": session_id}
+        await to_thread(conversation_store.save, conversation_id, saved, request_id, request.prompt, result)
+        return result
+
+
 @app.post("/agent/prompt")
 async def handle_prompt(request: PromptRequest):
     """
@@ -144,26 +170,7 @@ async def handle_prompt(request: PromptRequest):
     """
     try:
         with session_start() as session_id:
-            if request.conversation_id:
-                if not request.request_id:
-                    raise HTTPException(422, "request_id is required for a conversation turn")
-                conversation_id = str(request.conversation_id)
-                request_id = str(request.request_id)
-                async with conversation_turns.acquire(conversation_id):
-                    saved = await to_thread(conversation_store.load, conversation_id)
-                    cached = saved["requests"].get(request_id)
-                    if cached:
-                        if cached["prompt"] != request.prompt:
-                            raise HTTPException(409, "This request ID was already used for another message")
-                        return cached["result"]
-                    turn = await travel_graph.serve_conversation(request.prompt, saved["messages"], saved["trip"], saved["recommendation"])
-                    result = {**turn, "conversation_id": conversation_id, "session_id": session_id["executionID"]}
-                    await to_thread(conversation_store.save, conversation_id, saved, request_id, request.prompt, result)
-                    return result
-            # Execute the travel graph and wait for completion
-            result = await travel_graph.serve(request.prompt)
-            logger.info(f"Travel search completed, session: {session_id['executionID']}")
-            return {"response": result, "session_id": session_id["executionID"]}
+            return await _conversation_response(request, session_id["executionID"])
     except HTTPException:
         raise
     except ConversationConflict as exc:
@@ -183,44 +190,58 @@ async def delete_conversation(conversation_id: UUID):
 
 
 @app.post("/agent/prompt/stream")
-async def handle_stream_prompt(request: PromptRequest):
-    """
-    Process a travel planning request with streaming response.
-    
-    This endpoint streams results as they're generated, providing
-    real-time updates during the flight/hotel search process.
-    
-    Args:
-        request: PromptRequest containing the user's travel request
-    
-    Returns:
-        StreamingResponse: NDJSON stream with progressive updates
-    
-    Raises:
-        HTTPException: 400 for invalid input, 500 for server errors
-    
-    Response format (NDJSON - one JSON object per line):
-        {"response": "Searching for flights...", "session_id": "..."}
-        {"response": "Found 15 flights...", "session_id": "..."}
-        {"response": "Best deal: $1,234 total...", "session_id": "..."}
-    """
-    if request.conversation_id:
-        raise HTTPException(400, "Conversation streaming is not supported yet; use /agent/prompt")
+async def handle_stream_prompt(prompt_request: PromptRequest, request: Request):
+    """Stream public typed progress, then the same saved result as /agent/prompt."""
+    if prompt_request.conversation_id and not prompt_request.request_id:
+        raise HTTPException(422, "request_id is required for a conversation turn")
 
     async def stream_generator():
-        # Keep the tracing context alive for the entire asynchronous iteration.
-        with session_start() as session_id:
+        with session_start() as session:
+            queue: asyncio.Queue = asyncio.Queue()
+            token = progress_sink.set(queue.put_nowait)
             try:
-                async for chunk in travel_graph.streaming_serve(request.prompt):
-                    yield json.dumps({"response": chunk, "session_id": session_id["executionID"]}) + "\n"
-            except Exception:
-                logger.error("Travel stream failed")
-                yield json.dumps({"response": "Travel search failed. Check provider credentials and service logs.", "session_id": session_id["executionID"]}) + "\n"
+                task = asyncio.create_task(_conversation_response(prompt_request, session["executionID"]))
+            finally:
+                progress_sink.reset(token)
+            yield json.dumps({"type": "status", "component": "request", "message": "Starting search"}) + "\n"
+            try:
+                while not task.done() or not queue.empty():
+                    if await request.is_disconnected():
+                        task.cancel()
+                        return
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=0.2)
+                    except asyncio.TimeoutError:
+                        continue
+                    yield json.dumps(event) + "\n"
+                try:
+                    result = task.result()
+                except HTTPException as exc:
+                    yield json.dumps({"type": "error", "component": "request", "message": str(exc.detail),
+                                      "status": exc.status_code}) + "\n"
+                    return
+                except ConversationConflict as exc:
+                    yield json.dumps({"type": "error", "component": "request", "message": str(exc), "status": 409}) + "\n"
+                    return
+                except Exception:
+                    logger.exception("Travel stream failed")
+                    yield json.dumps({"type": "error", "component": "request",
+                                      "message": "Travel search failed. Please try again."}) + "\n"
+                    return
+                answer = result["response"]
+                for start in range(0, len(answer), 240):
+                    yield json.dumps({"type": "text", "text": answer[start:start + 240]}) + "\n"
+                yield json.dumps({"type": "done", "result": result}) + "\n"
+            finally:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
 
-    return StreamingResponse(
-        stream_generator(), media_type="application/x-ndjson",
-        headers={"Cache-Control": "no-cache"},
-    )
+    return StreamingResponse(stream_generator(), media_type="application/x-ndjson",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/health")

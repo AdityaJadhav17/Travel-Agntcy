@@ -29,6 +29,10 @@ async def extract(context):
     for city, code in (("new york", "JFK"), ("boston", "BOS"), ("tokyo", "NRT")):
         if city in prompt:
             params.update(destination=code, destination_city=city.title(), location=city.title())
+    if marker := re.search(r"transient hotel ([a-f0-9-]+)", prompt):
+        params["destination_city"] = "Transient-" + marker[1]
+    if marker := re.search(r"slow hotel ([a-f0-9-]+)", prompt):
+        params["destination_city"] = "Slow-" + marker[1]
     if "dallas" in prompt:
         params["origin"] = "DFW"
     dates = re.findall(r"\d{4}-\d{2}-\d{2}", prompt)

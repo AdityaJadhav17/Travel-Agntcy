@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { test, expect, type Page } from "@playwright/test"
+import { test, expect, type Page, type Response } from "@playwright/test"
 
 const api = process.env.E2E_API_URL || "http://localhost:8000"
 const start = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10)
@@ -8,30 +8,58 @@ const end = new Date(Date.now() + 63 * 86400000).toISOString().slice(0, 10)
 async function send(page: Page, prompt: string) {
   const response = page.waitForResponse(
     (reply) =>
-      reply.url().endsWith("/agent/prompt") &&
+      reply.url().endsWith("/agent/prompt/stream") &&
       reply.request().method() === "POST",
   )
   await page.getByRole("textbox").fill(prompt)
   await page.getByRole("textbox").press("Enter")
   const result = await response
   expect(result.status()).toBe(200)
-  return result.json()
+  return streamResult(result)
+}
+
+async function streamResult(response: Response) {
+  const events = (await response.text())
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+  const done = events.find((event) => event.type === "done")
+  expect(done, JSON.stringify(events)).toBeTruthy()
+  return done.result
 }
 
 test("structured cards survive rewritten narrative and reload", async ({
   page,
 }) => {
-  await page.route("**/agent/prompt", async (route) => {
+  await page.route("**/agent/prompt/stream", async (route) => {
     const response = await route.fetch()
-    const body = await response.json()
-    if (body.travel_result) {
-      await route.fulfill({
-        response,
-        json: { ...body, response: "Narrative wording changed after search." },
-      })
-    } else {
-      await route.fulfill({ response })
-    }
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    const hasResult = events.some(
+      (event) => event.type === "done" && event.result.travel_result,
+    )
+    await route.fulfill({
+      response,
+      body:
+        events
+          .map((event) =>
+            hasResult && event.type === "done"
+              ? {
+                  ...event,
+                  result: {
+                    ...event.result,
+                    response: "Narrative wording changed after search.",
+                  },
+                }
+              : hasResult && event.type === "text"
+                ? { ...event, text: "" }
+                : event,
+          )
+          .map((event) => JSON.stringify(event))
+          .join("\n") + "\n",
+    })
   })
   await page.goto("/")
   await send(page, "Plan Dallas to New York")
@@ -55,18 +83,33 @@ test("structured cards survive rewritten narrative and reload", async ({
 })
 
 test("unknown result versions fall back to the narrative", async ({ page }) => {
-  await page.route("**/agent/prompt", async (route) => {
+  await page.route("**/agent/prompt/stream", async (route) => {
     const response = await route.fetch()
-    const body = await response.json()
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
     await route.fulfill({
       response,
-      json: body.travel_result
-        ? {
-            ...body,
-            travel_result: { ...body.travel_result, version: 2 },
-            response: "A future version result is still readable.",
-          }
-        : body,
+      body:
+        events
+          .map((event) =>
+            event.type === "done" && event.result.travel_result
+              ? {
+                  ...event,
+                  result: {
+                    ...event.result,
+                    travel_result: {
+                      ...event.result.travel_result,
+                      version: 2,
+                    },
+                    response: "A future version result is still readable.",
+                  },
+                }
+              : event,
+          )
+          .map((event) => JSON.stringify(event))
+          .join("\n") + "\n",
     })
   })
   await page.goto("/")
@@ -78,6 +121,55 @@ test("unknown result versions fall back to the narrative", async ({ page }) => {
   await expect(
     page.getByRole("region", { name: "Travel results" }),
   ).toHaveCount(0)
+})
+
+test("hotel failure keeps flights and retries hotels after reload", async ({
+  page,
+}) => {
+  const marker = randomUUID()
+  const prompt = `Plan Dallas to New York with transient hotel ${marker}`
+  await page.goto("/")
+  await send(page, prompt)
+  const partial = await send(page, `${start} to ${end}`)
+  expect(partial.travel_result.kind).toBe("flight_only")
+  expect(partial.retry_hotels).toBe(true)
+  expect(partial.partial_search.flights).toHaveLength(1)
+  await expect(page.getByRole("button", { name: "Retry hotels" })).toBeVisible()
+  await page.reload()
+  await page
+    .getByRole("button", { name: /Plan Dallas to New York with transi/ })
+    .click()
+  const response = page.waitForResponse((reply) =>
+    reply.url().endsWith("/agent/prompt/stream"),
+  )
+  await page.getByRole("button", { name: "Retry hotels" }).click()
+  const completed = await streamResult(await response)
+  expect(completed.travel_result.kind).toBe("full_trip")
+  expect(completed.travel_result.total_usd).toBe(540)
+  expect(completed.partial_search).toBeNull()
+  await expect(page.getByRole("button", { name: "Retry hotels" })).toHaveCount(
+    0,
+  )
+})
+
+test("Stop ignores late hotel results", async ({ page }) => {
+  const marker = randomUUID()
+  await page.goto("/")
+  await send(page, `Plan Dallas to New York with slow hotel ${marker}`)
+  await page.getByRole("textbox").fill(`${start} to ${end}`)
+  await page.getByRole("textbox").press("Enter")
+  await expect(page.getByRole("status")).toContainText("Searching hotels")
+  await expect(
+    page.getByRole("region", { name: "Travel results" }).getByRole("heading", {
+      name: "Fixture Air",
+    }),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Stop", exact: true }).click()
+  await expect(
+    page.getByText("Search stopped. Late results will be ignored."),
+  ).toBeVisible()
+  await page.waitForTimeout(3500)
+  await expect(page.getByText("Fixture Central Hotel")).toHaveCount(0)
 })
 
 test("explains a retained trip after reload and does not leak it to a new chat", async ({
@@ -175,14 +267,14 @@ test("a late answer stays with its chat and new chats start without trip context
   await send(page, "Dallas.")
   await page.getByRole("button", { name: "New chat", exact: true }).click()
   const response = page.waitForResponse((reply) =>
-    reply.url().endsWith("/agent/prompt"),
+    reply.url().endsWith("/agent/prompt/stream"),
   )
   await page.getByRole("textbox").fill("Plan Tokyo.")
   await page.getByRole("textbox").press("Enter")
   await page
     .getByRole("button", { name: "Plan New York.", exact: true })
     .click()
-  const tokyo = await (await response).json()
+  const tokyo = await streamResult(await response)
   expect(tokyo.trip_state.destination).toBe("NRT")
   expect(tokyo.trip_state.origin).toBeFalsy()
   await expect(

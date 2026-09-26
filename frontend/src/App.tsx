@@ -22,8 +22,9 @@ import { Message } from "./types/message"
 import { getGraphConfig } from "@/utils/graphConfigs"
 import { PATTERNS, PatternType } from "@/utils/patternUtils"
 import TravelResponseCard from "@/components/Chat/TravelResponseCard"
+import StructuredTravelResultCard from "@/components/Chat/StructuredTravelResultCard"
 import { BudgetAssessment } from "@/types/budget"
-import type { TravelResult } from "@/types/travelResult"
+import { parseTravelResult, type TravelResult } from "@/types/travelResult"
 import { Plane } from "lucide-react"
 
 interface ApiResponse {
@@ -33,6 +34,7 @@ interface ApiResponse {
   trip_state?: Record<string, unknown>
   budget_assessment?: BudgetAssessment | null
   travel_result?: TravelResult | null
+  retry_hotels?: boolean
 }
 
 interface ConversationMessage {
@@ -40,6 +42,7 @@ interface ConversationMessage {
   content: string
   budget_assessment?: BudgetAssessment | null
   travel_result?: TravelResult | null
+  retry_hotels?: boolean
 }
 
 export interface ChatHistoryItem {
@@ -53,10 +56,11 @@ export interface ChatHistoryItem {
 const CHAT_HISTORY_KEY = "travel_chat_history"
 
 const App: React.FC = () => {
-  const { sendMessage, deleteConversation } = useAgentAPI()
+  const { streamMessage, cancelStream, deleteConversation } = useAgentAPI()
   const activeChatRef = useRef<string | null>(null)
   const pendingChats = useRef(new Set<string>())
   const deletedChats = useRef(new Set<string>())
+  const requestVersions = useRef(new Map<string, number>())
   const [historyError, setHistoryError] = useState("")
 
   const [selectedPattern, setSelectedPattern] = useState<PatternType>(
@@ -70,6 +74,9 @@ const App: React.FC = () => {
     undefined,
   )
   const [isAgentLoading, setIsAgentLoading] = useState<boolean>(false)
+  const [progressStatus, setProgressStatus] = useState("")
+  const [partialResult, setPartialResult] = useState<TravelResult | null>(null)
+  const [streamText, setStreamText] = useState("")
   const [apiError, setApiError] = useState<boolean>(false)
   const [showFinalResponse, setShowFinalResponse] = useState<boolean>(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true)
@@ -167,6 +174,11 @@ const App: React.FC = () => {
     activeChatRef.current = chatId
     setCurrentChatId(chatId)
     pendingChats.current.add(chatId)
+    const version = (requestVersions.current.get(chatId) || 0) + 1
+    requestVersions.current.set(chatId, version)
+    setProgressStatus("Starting search")
+    setPartialResult(null)
+    setStreamText("")
     setHistoryError("")
     setCurrentUserMessage(query)
     setIsAgentLoading(true)
@@ -195,7 +207,25 @@ const App: React.FC = () => {
     let response: ApiResponse
     let failed = false
     try {
-      response = await sendMessage(query, selectedPattern, conversationId)
+      response = await streamMessage(
+        query,
+        selectedPattern,
+        conversationId,
+        (event) => {
+          if (
+            requestVersions.current.get(chatId) !== version ||
+            activeChatRef.current !== chatId
+          )
+            return
+          if (event.type === "status" || event.type === "error") {
+            setProgressStatus(event.message)
+          } else if (event.type === "result") {
+            setPartialResult(parseTravelResult(event.travel_result))
+          } else if (event.type === "text") {
+            setStreamText((text) => text + event.text)
+          }
+        },
+      )
     } catch (error) {
       failed = true
       logger.apiError("/agent/prompt", error)
@@ -204,7 +234,11 @@ const App: React.FC = () => {
       }
     }
     pendingChats.current.delete(chatId)
-    if (deletedChats.current.has(chatId)) return
+    if (
+      deletedChats.current.has(chatId) ||
+      requestVersions.current.get(chatId) !== version
+    )
+      return
     const updatedMessages = [
       ...newMessages,
       {
@@ -212,6 +246,7 @@ const App: React.FC = () => {
         content: response.response,
         budget_assessment: response.budget_assessment,
         travel_result: response.travel_result,
+        retry_hotels: response.retry_hotels,
       },
     ]
     setChatHistory((previous) =>
@@ -223,6 +258,9 @@ const App: React.FC = () => {
     setConversationMessages(updatedMessages)
     setAgentResponse(response)
     setIsAgentLoading(false)
+    setProgressStatus("")
+    setPartialResult(null)
+    setStreamText("")
     setButtonClicked(false)
     setAiReplied(true)
     setApiError(failed)
@@ -240,6 +278,36 @@ const App: React.FC = () => {
     handleUserInput(query)
   }
 
+  const handleStop = () => {
+    const chatId = activeChatRef.current
+    if (!chatId || !pendingChats.current.has(chatId)) return
+    const chat = chatHistory.find((item) => item.id === chatId)
+    if (!chat?.conversationId) return
+    requestVersions.current.set(
+      chatId,
+      (requestVersions.current.get(chatId) || 0) + 1,
+    )
+    cancelStream(chat.conversationId)
+    pendingChats.current.delete(chatId)
+    const stopped: ConversationMessage = {
+      role: "assistant",
+      content: "Search stopped. Late results will be ignored.",
+    }
+    setConversationMessages((previous) => [...previous, stopped])
+    setChatHistory((previous) =>
+      previous.map((item) =>
+        item.id === chatId
+          ? { ...item, messages: [...item.messages, stopped] }
+          : item,
+      ),
+    )
+    setIsAgentLoading(false)
+    setProgressStatus("")
+    setPartialResult(null)
+    setStreamText("")
+    setButtonClicked(false)
+  }
+
   const handleClearConversation = () => {
     activeChatRef.current = null
     setHistoryError("")
@@ -247,6 +315,9 @@ const App: React.FC = () => {
     setCurrentUserMessage("")
     setAgentResponse(undefined)
     setIsAgentLoading(false)
+    setProgressStatus("")
+    setPartialResult(null)
+    setStreamText("")
     setButtonClicked(false)
     setAiReplied(false)
     setShowFinalResponse(false)
@@ -274,6 +345,11 @@ const App: React.FC = () => {
       setApiError(false)
       activeChatRef.current = chatId
       setIsAgentLoading(pendingChats.current.has(chatId))
+      setProgressStatus(
+        pendingChats.current.has(chatId) ? "Search in progress" : "",
+      )
+      setPartialResult(null)
+      setStreamText("")
       setHistoryError(
         selectedChat.conversationId
           ? ""
@@ -304,6 +380,14 @@ const App: React.FC = () => {
   const handleDeleteChat = async (chatId: string) => {
     const chat = chatHistory.find((item) => item.id === chatId)
     try {
+      if (chat?.conversationId && pendingChats.current.has(chatId)) {
+        cancelStream(chat.conversationId)
+        requestVersions.current.set(
+          chatId,
+          (requestVersions.current.get(chatId) || 0) + 1,
+        )
+        pendingChats.current.delete(chatId)
+      }
       if (chat?.conversationId) await deleteConversation(chat.conversationId)
       deletedChats.current.add(chatId)
       setChatHistory((previous) =>
@@ -439,6 +523,18 @@ const App: React.FC = () => {
                               budget={msg.budget_assessment}
                               travelResult={msg.travel_result}
                             />
+                            {msg.retry_hotels &&
+                              index === conversationMessages.length - 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUserInput("Retry hotels")
+                                  }
+                                  className="mt-3 rounded-lg border border-emerald-400 px-3 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-400/10"
+                                >
+                                  Retry hotels
+                                </button>
+                              )}
                           </div>
                         </div>
                       )}
@@ -457,10 +553,25 @@ const App: React.FC = () => {
                       >
                         <Plane className="h-4 w-4 text-white" />
                       </div>
-                      <div className="flex items-center gap-1 pt-3">
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-[#3ce98a] [animation-delay:-0.3s]" />
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-[#5feb9b] [animation-delay:-0.15s]" />
-                        <div className="h-2 w-2 animate-bounce rounded-full bg-[#7becac]" />
+                      <div className="flex-1 space-y-3 pt-1">
+                        <p role="status" className="text-sm text-emerald-200">
+                          {progressStatus || "Working on your trip"}
+                        </p>
+                        {partialResult && (
+                          <StructuredTravelResultCard result={partialResult} />
+                        )}
+                        {streamText && (
+                          <p className="whitespace-pre-wrap text-sm text-gray-300">
+                            {streamText}
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleStop}
+                          className="rounded-lg border border-gray-500 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-700"
+                        >
+                          Stop
+                        </button>
                       </div>
                     </div>
                   )}

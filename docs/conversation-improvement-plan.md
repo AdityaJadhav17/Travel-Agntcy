@@ -232,8 +232,8 @@ hotel change all pass.
 ### Structured travel result cards (US11)
 
 Successful conversation searches now return a versioned `travel_result` beside
-the existing natural-language response. The payload contains bounded flight, hotel and
-activity facts from the provider results after budget filtering, including full
+the existing natural-language response. The payload contains bounded flight,
+hotel and activity facts from the provider results after budget filtering, including full
 hotel stay prices and unknown-price states. Full-trip hotel replacement returns
 the retained flight and newly selected hotel. The browser validates version 1
 before rendering cards and saves it with chat history. Unknown versions, malformed
@@ -243,12 +243,38 @@ HTML insertion.
 
 The contract is covered by Python tests and browser journeys that rewrite the
 response text while leaving quote data intact, reload the chat, and check the
-unknown-version fallback. This establishes the result payload needed by the
-planned typed progress events (US10); streaming and partial provider results are
-still separate work.
+unknown-version fallback. This establishes the result payload used by the
+typed progress events below.
 
 Docker verification: 136 Python tests pass with 99.05% branch-inclusive
 coverage across the gated modules, including 100% for the result schema.
 Ruff and frontend lint, formatting, TypeScript and production build pass.
 All 22 Chromium/Firefox E2E journeys pass. The local Docker supervisor and UI
 were recreated and reported healthy.
+
+### Streamed progress and focused provider retry (US10, US12)
+
+Conversation searches now use a typed NDJSON stream with public `status`,
+`result`, `error`, `text`, and `done` events. Flight options appear while hotels
+are still being searched. The browser shows the current search step and a Stop
+button; cancellation aborts the request and ignores late events. The final
+`done` event contains the same atomically saved, idempotent conversation result
+as the non-streaming endpoint. The old endpoint remains available for clients
+that need a single JSON response. Internal graph events and model reasoning are
+not streamed.
+
+Provider calls have 20-second supervisor timeouts. If a full-trip hotel call
+fails or returns no options, the app keeps the successful flights and identifies
+the failure separately from an empty result. Up to two focused hotel retries
+reuse bounded saved flight facts; a flight quote older than five minutes is
+rechecked against the same itinerary before the retry can present a trip. A
+missing or unpriced itinerary never becomes a silently substituted flight.
+Retry snapshots are stored with the conversation, cleared by a new search or
+successful retry, and removed on deletion. The UI offers Retry hotels only when
+the saved flights can support it.
+
+Docker verification: 143 backend tests pass with 98.95% branch-inclusive
+coverage across the gated modules; Ruff and frontend lint, formatting, types
+and production build pass. All 26 Chromium/Firefox browser journeys pass,
+including progress, Stop, transient hotel failure, retry after browser reload,
+and previous conversation behavior.

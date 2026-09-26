@@ -78,6 +78,19 @@ def test_context_and_request_cache_are_bounded(store):
     assert saved["trip"]["destination"] == "JFK"
 
 
+def test_partial_search_is_atomic_and_removed_with_conversation(store):
+    first = store.load("one")
+    facts = {"version": 1, "reason": "error", "flights": [{"id": "flight-a"}]}
+    store.save("one", first, "r1", "Plan", {"response": "Flights found", "trip_state": {}, "partial_search": facts})
+    assert store.load("one")["partial_search"] == facts
+    second = store.load("one")
+    store.save("one", second, "r2", "Retry hotels", {"response": "Trip found", "trip_state": {}, "partial_search": None})
+    assert store.load("one")["partial_search"] is None
+    store.delete("one")
+    with pytest.raises(ConversationConflict):
+        store.load("one")
+
+
 def test_api_retry_failure_and_delete(store, monkeypatch):
     turn = AsyncMock(return_value={"response": "Where from?", "trip_state": {"destination": "JFK"}})
     monkeypatch.setattr(main.travel_graph, "serve_conversation", turn)
@@ -98,12 +111,58 @@ def test_api_retry_failure_and_delete(store, monkeypatch):
         assert client.post('/agent/prompt', json=body("Dallas", conversation_id)).status_code == 409
 
 
-def test_api_rejects_invalid_ids_and_unsupported_stream_memory(store):
+def test_api_rejects_invalid_ids_and_missing_stream_request_id(store):
     with TestClient(main.app) as client:
         assert client.post('/agent/prompt', json=body("hi", "not-a-uuid")).status_code == 422
         assert client.post('/agent/prompt', json={"prompt": "hi", "conversation_id": str(uuid4())}).status_code == 422
-        assert client.post('/agent/prompt/stream', json=body("hi", str(uuid4()))).status_code == 400
+        assert client.post('/agent/prompt/stream', json={"prompt": "hi", "conversation_id": str(uuid4())}).status_code == 422
         assert client.post('/agent/prompt', json={"prompt": "x" * 12001}).status_code == 422
+
+
+def test_conversation_stream_emits_public_events_and_saves_once(store, monkeypatch):
+    from agents.supervisors.travel.graph.progress import emit
+
+    async def model(*_):
+        emit("status", component="flights", message="Searching flights")
+        return {"response": "Flight found", "trip_state": {"origin": "DFW"}}
+
+    monkeypatch.setattr(main.travel_graph, "serve_conversation", model)
+    conversation_id = str(uuid4())
+    with TestClient(main.app) as client:
+        response = client.post('/agent/prompt/stream', json=body("Plan Dallas", conversation_id))
+    events = [json.loads(line) for line in response.text.splitlines()]
+    assert [event["type"] for event in events] == ["status", "status", "text", "done"]
+    assert events[1] == {"type": "status", "component": "flights", "message": "Searching flights"}
+    assert events[-1]["result"]["response"] == "Flight found"
+    assert store.load(conversation_id)["revision"] == 1
+
+
+def test_disconnected_stream_cancels_before_saving(store, monkeypatch):
+    async def scenario():
+        entered = asyncio.Event()
+
+        async def model(*_):
+            entered.set()
+            await asyncio.Event().wait()
+
+        class Disconnected:
+            async def is_disconnected(self):
+                return True
+
+        monkeypatch.setattr(main.travel_graph, "serve_conversation", model)
+        conversation_id = str(uuid4())
+        response = await main.handle_stream_prompt(
+            main.PromptRequest(prompt="Plan Dallas", conversation_id=conversation_id, request_id=uuid4()),
+            Disconnected(),
+        )
+        stream = response.body_iterator
+        assert json.loads(await anext(stream))["type"] == "status"
+        await asyncio.wait_for(entered.wait(), 2)
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+        assert store.load(conversation_id)["revision"] == 0
+
+    asyncio.run(scenario())
 
 
 def test_overlapping_retries_do_not_repeat_model_work(store, monkeypatch):
@@ -176,7 +235,7 @@ def test_queued_turn_observes_previous_saved_context(store, monkeypatch):
     async def scenario():
         entered, finish = asyncio.Event(), asyncio.Event()
 
-        async def model(prompt, messages, trip, recommendation=None):
+        async def model(prompt, messages, trip, recommendation=None, partial_search=None):
             if prompt == 'Plan New York':
                 entered.set()
                 await finish.wait()

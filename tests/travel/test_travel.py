@@ -149,12 +149,10 @@ def test_api_validation_and_cors():
 
 
 def test_ndjson_stream(monkeypatch):
-    async def stream(_):
-        yield 'Result one'
-        yield 'Result two'
-    monkeypatch.setattr(main.travel_graph, 'streaming_serve', stream)
+    monkeypatch.setattr(main.travel_graph, 'serve', AsyncMock(return_value='Result one'))
     with TestClient(main.app) as client:
         response = client.post('/agent/prompt/stream', json={'prompt':'trip'})
     lines = [json.loads(line) for line in response.text.splitlines()]
-    assert [line['response'] for line in lines] == ['Result one','Result two']
-    assert lines[0]['session_id'] == lines[1]['session_id']
+    assert [line['type'] for line in lines] == ['status', 'text', 'done']
+    assert lines[-1]['result']['response'] == 'Result one'
+    assert lines[-1]['result']['session_id']

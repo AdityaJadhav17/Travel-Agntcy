@@ -17,6 +17,7 @@ Node Flow:
 """
 
 import logging
+import asyncio
 import json
 import re
 import uuid
@@ -36,10 +37,13 @@ from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
 from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, explain_recommendation, quote_facts
 from agents.supervisors.travel.graph.travel_results import travel_result
+from agents.supervisors.travel.graph.partial_searches import PartialSearch, retain_flights
+from agents.supervisors.travel.graph.progress import emit
 from common.llm import get_llm
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
 
 logger = logging.getLogger("lungo.travel.supervisor.graph")
+PROVIDER_TIMEOUT_SECONDS = 20
 
 
 class NodeStates:
@@ -56,6 +60,7 @@ class NodeStates:
     GENERAL_INFO = "general"
     EXPLAIN = "explain_recommendation"
     HOTEL_CHANGE = "change_hotel"
+    HOTEL_RETRY = "retry_hotels"
     REFLECTION = "reflection"
 
 
@@ -74,6 +79,8 @@ class GraphState(MessagesState):
     budget_assessment: dict | None = None
     recommendation: dict | None = None
     travel_result: dict | None = None
+    partial_search: dict | None = None
+    retry_hotels: bool = False
 
 
 @agent(name="travel_agent")
@@ -138,6 +145,7 @@ class TravelGraph:
         workflow.add_node(NodeStates.GENERAL_INFO, self._general_response_node)
         workflow.add_node(NodeStates.EXPLAIN, self._explain_recommendation_node)
         workflow.add_node(NodeStates.HOTEL_CHANGE, self._change_hotel_node)
+        workflow.add_node(NodeStates.HOTEL_RETRY, self._retry_hotels_node)
         workflow.add_node(NodeStates.REFLECTION, self._reflection_node)
 
         # --- 2. Define the Agentic Workflow ---
@@ -152,6 +160,7 @@ class TravelGraph:
                 NodeStates.GENERAL_INFO: NodeStates.GENERAL_INFO,
                 NodeStates.EXPLAIN: NodeStates.EXPLAIN,
                 NodeStates.HOTEL_CHANGE: NodeStates.HOTEL_CHANGE,
+                NodeStates.HOTEL_RETRY: NodeStates.HOTEL_RETRY,
             },
         )
 
@@ -162,6 +171,7 @@ class TravelGraph:
         workflow.add_edge(NodeStates.GENERAL_INFO, END)
         workflow.add_edge(NodeStates.EXPLAIN, END)
         workflow.add_edge(NodeStates.HOTEL_CHANGE, END)
+        workflow.add_edge(NodeStates.HOTEL_RETRY, END)
 
         # Reflection decides whether to continue or end
         workflow.add_conditional_edges(
@@ -190,6 +200,8 @@ class TravelGraph:
             Updated state with next_node routing decision
         """
         latest = next((m.content for m in reversed(state["messages"]) if m.type == "human"), "")
+        if isinstance(latest, str) and latest.strip().lower().rstrip("?.!") == "retry hotels":
+            return {"next_node": NodeStates.HOTEL_RETRY}
         if isinstance(latest, str) and latest.strip().lower().rstrip("?.!") in {
             "why this one", "why this trip", "why did you choose this", "explain this recommendation",
         }:
@@ -256,7 +268,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         if "travel_search" in intent:
             # A new search or clarification invalidates the previous selection.
             # Never explain an old destination/party as the newly requested trip.
-            return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None}
+            return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None, "partial_search": None}
         else:
             return {"next_node": NodeStates.GENERAL_INFO}
 
@@ -355,6 +367,102 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                                                hotels=[plan["hotel"]],
                                                notice="Selected flight retained; replacement hotels refreshed.")}
 
+    @staticmethod
+    def _partial_full_trip_response(params, flights, checkout, reason, attempts=0):
+        saved = retain_flights(flights, params, checkout, reason, attempts)
+        problem = ("The hotel search failed or timed out." if reason == "error"
+                   else "The hotel search returned no options for these dates.")
+        retry = (" Select Retry hotels to check hotels again without repeating the flight search."
+                 if saved else " Please start a new search when you're ready to try again.")
+        response = (f"I found {len(flights)} flight option{'s' if len(flights) != 1 else ''}. "
+                    + problem + " No flight + hotel total is verified." + retry)
+        return {**TravelGraph._quoted_response(response),
+                "travel_result": travel_result("flight_only", params, flights=flights),
+                "partial_search": saved, "retry_hotels": saved is not None}
+
+    async def _complete_full_trip(self, params, flights, hotels, checkout, location):
+        if params.budget_amount is not None:
+            flights = [f for f in flights if quote_total(f, "flight", params) is not None]
+            hotels = [{**h, "total_price": float(total)} for h in hotels
+                      if (total := quote_total(h, "hotel", params)) is not None]
+            if not flights or not hotels:
+                return {**self._quoted_response("Try different dates to find complete prices.", assessment(params, None)),
+                        "partial_search": None}
+        plan = find_cheapest_plan(flights, hotels)
+        if not plan:
+            response = (f"I found {len(flights)} flights and {len(hotels)} hotels, but couldn't find a valid combination.\n\n"
+                        "This usually happens when hotel check-in times conflict with flight arrival. "
+                        "Try an earlier departure or later check-in time.")
+            return {**self._quoted_response(response), "partial_search": None}
+        summary = None
+        if params.budget_amount is not None:
+            total = quote_total(plan["flight"], "flight", params) + quote_total(plan["hotel"], "hotel", params)
+            summary = assessment(params, total)
+            if summary["status"] == "over":
+                return {**self._quoted_response("Try different dates or raise your quoted-cost budget. I have not selected an over-budget trip.", summary),
+                        "partial_search": None}
+        activities = []
+        emit("status", component="activities", message="Looking for activities")
+        try:
+            activities = await asyncio.wait_for(get_activities_via_a2a(location, "things to do"), timeout=PROVIDER_TIMEOUT_SECONDS)
+        except (Exception, asyncio.TimeoutError) as exc:
+            logger.warning("Activity search failed: %s", exc)
+            emit("error", component="activities", message="Activity provider unavailable")
+        response = self._format_travel_plan(plan, params, activities, checkout)
+        return {**self._quoted_response(response, summary),
+                "recommendation": capture_recommendation(plan, params),
+                "travel_result": travel_result("full_trip", params, flights=[plan["flight"]],
+                                               hotels=[plan["hotel"]], activities=activities,
+                                               hotel_checkout_date=checkout),
+                "partial_search": None}
+
+    async def _retry_hotels_node(self, state: GraphState) -> dict:
+        try:
+            saved = PartialSearch.model_validate(state.get("partial_search"))
+        except (ValidationError, TypeError):
+            return {**self._quoted_response("I don't have a recent partial trip to retry. Please start a new trip search."),
+                    "partial_search": None}
+        params = saved.trip
+        flights = [item.itinerary.model_dump(exclude_none=True) for item in saved.flights]
+        age = datetime.now(timezone.utc) - saved.searched_at.astimezone(timezone.utc)
+        if age < timedelta(0):
+            return {**self._quoted_response("The saved flight quote has an invalid time. Please search again."),
+                    "partial_search": None}
+        if age >= timedelta(minutes=5):
+            emit("status", component="flights", message="Rechecking the same flights")
+            try:
+                fresh = await asyncio.wait_for(get_flights_via_a2a(
+                    params.origin, params.destination, params.start_date,
+                    params.end_date if not params.is_one_way else None,
+                    is_one_way=params.is_one_way, party=params,
+                ), timeout=PROVIDER_TIMEOUT_SECONDS)
+            except (Exception, asyncio.TimeoutError):
+                return {**self._quoted_response("I couldn't recheck the saved flights. Please start a new trip search."),
+                        "partial_search": None}
+            ids = {item.id for item in saved.flights}
+            flights = [flight for flight in fresh
+                       if quote_facts(flight, "flight", params).id in ids
+                       and quote_total(flight, "flight", params) is not None]
+            if not flights:
+                return {**self._quoted_response("The same flights are no longer available at a complete USD quote. Please search again."),
+                        "partial_search": None}
+        location = params.destination_city or params.destination
+        emit("status", component="hotels", message="Retrying hotels")
+        try:
+            hotels = await asyncio.wait_for(get_hotels_via_a2a(
+                location, params.start_date, saved.hotel_checkout_date, party=params,
+            ), timeout=PROVIDER_TIMEOUT_SECONDS)
+        except (Exception, asyncio.TimeoutError):
+            emit("error", component="hotels", message="Hotel provider unavailable")
+            return self._partial_full_trip_response(params, flights, saved.hotel_checkout_date,
+                                                    "error", saved.attempts + 1)
+        if not hotels:
+            return self._partial_full_trip_response(params, flights, saved.hotel_checkout_date,
+                                                    "empty", saved.attempts + 1)
+        emit("result", component="hotels", travel_result=travel_result(
+            "hotel_only", params, hotels=hotels, hotel_checkout_date=saved.hotel_checkout_date))
+        return await self._complete_full_trip(params, flights, hotels, saved.hotel_checkout_date, location)
+
     async def _travel_search_node(self, state: GraphState) -> dict:
         """
         Handle travel search requests by extracting params and finding optimal plans.
@@ -381,6 +489,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             return {"messages": [AIMessage(content="I didn't receive your travel request. Please tell me your origin, destination, and travel dates.")]}
 
         logger.info(f"Processing travel search: {user_msg.content}")
+        emit("status", component="request", message="Understanding your trip")
 
         # Step 1: Extract travel parameters using structured output
         try:
@@ -474,18 +583,22 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         logger.info(f"Searching activities only for location: {location}")
         
         try:
-            activities = await get_activities_via_a2a(location, "things to do")
+            emit("status", component="activities", message="Searching activities")
+            activities = await asyncio.wait_for(get_activities_via_a2a(location, "things to do"), timeout=PROVIDER_TIMEOUT_SECONDS)
             
             if not activities:
                 return {"messages": [AIMessage(content=f"I couldn't find any activities in {location}. Please try another location.")]}
             
             response = self._format_activities_only(activities, location)
+            emit("result", component="activities", travel_result=travel_result(
+                "activity_only", params, activities=activities))
             return {"messages": [AIMessage(content=response)], "full_response": response,
                     "travel_result": travel_result("activity_only", params, activities=activities)}
             
         except Exception as e:
             logger.error(f"Error searching activities: {e}")
-            return {"messages": [AIMessage(content=f"I encountered an error searching for activities: {str(e)}")]}
+            emit("error", component="activities", message="Activity provider unavailable")
+            return self._quoted_response("The activity provider is unavailable. Please try again later.")
 
     async def _handle_hotel_only_search(self, params: TravelSearchArgs) -> dict:
         """
@@ -516,7 +629,10 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         logger.info(f"Searching hotels only for location: {location}, {params.start_date} to {params.end_date}")
         
         try:
-            hotels = await get_hotels_via_a2a(location, params.start_date, params.end_date, party=params)
+            emit("status", component="hotels", message="Searching hotels")
+            hotels = await asyncio.wait_for(get_hotels_via_a2a(
+                location, params.start_date, params.end_date, party=params,
+            ), timeout=PROVIDER_TIMEOUT_SECONDS)
             summary = None
             if params.budget_amount is not None:
                 hotels, summary = filter_quotes(hotels, "hotel", params)
@@ -527,12 +643,15 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 return {"messages": [AIMessage(content=f"I couldn't find any hotels in {location} for those dates. Please try different dates or another location.")]}
             
             response = self._format_hotels_only(hotels, location, params)
+            emit("result", component="hotels", travel_result=travel_result(
+                "hotel_only", params, hotels=hotels))
             return {**self._quoted_response(response, summary),
                     "travel_result": travel_result("hotel_only", params, hotels=hotels)}
             
         except Exception as e:
             logger.error(f"Error searching hotels: {e}")
-            return {"messages": [AIMessage(content=f"I encountered an error searching for hotels: {str(e)}")]}
+            emit("error", component="hotels", message="Hotel provider unavailable")
+            return self._quoted_response("The hotel provider is unavailable. Please try again later.")
 
     async def _handle_flight_only_search(self, params: TravelSearchArgs) -> dict:
         """
@@ -562,14 +681,15 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         logger.info(f"Searching {trip_type} flights only: {params.origin} -> {params.destination}")
         
         try:
-            flights = await get_flights_via_a2a(
+            emit("status", component="flights", message="Searching flights")
+            flights = await asyncio.wait_for(get_flights_via_a2a(
                 params.origin,
                 params.destination,
                 params.start_date,
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
                 party=params,
-            )
+            ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
             summary = None
             if params.budget_amount is not None:
@@ -580,12 +700,15 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination} for {params.start_date}. Please try different dates.")]}
             
             response = self._format_flights_only(flights, params)
+            emit("result", component="flights", travel_result=travel_result(
+                "flight_only", params, flights=flights))
             return {**self._quoted_response(response, summary),
                     "travel_result": travel_result("flight_only", params, flights=flights)}
             
         except Exception as e:
             logger.error(f"Error searching flights: {e}")
-            return {"messages": [AIMessage(content=f"I encountered an error searching for flights: {str(e)}")]}
+            emit("error", component="flights", message="Flight provider unavailable")
+            return self._quoted_response("The flight provider is unavailable. Please try again later.")
 
     async def _handle_full_trip_search(self, params: TravelSearchArgs) -> dict:
         """
@@ -621,66 +744,45 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         
         try:
             # Search for flights
-            flights = await get_flights_via_a2a(
+            emit("status", component="flights", message="Searching flights")
+            flights = await asyncio.wait_for(get_flights_via_a2a(
                 params.origin,
                 params.destination,
                 params.start_date,
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
                 party=params,
-            )
+            ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
             if not flights:
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination}. Please try again.")]}
 
+            emit("result", component="flights", travel_result=travel_result(
+                "flight_only", params, flights=flights))
+
             # Search for hotels
             hotel_location = params.destination_city or params.destination
-            hotels = await get_hotels_via_a2a(hotel_location, params.start_date, hotel_checkout_date, party=params)
+            emit("status", component="hotels", message="Searching hotels")
+            try:
+                hotels = await asyncio.wait_for(get_hotels_via_a2a(
+                    hotel_location, params.start_date, hotel_checkout_date, party=params,
+            ), timeout=PROVIDER_TIMEOUT_SECONDS)
+            except (Exception, asyncio.TimeoutError):
+                logger.exception("Hotel search failed after flights were found")
+                emit("error", component="hotels", message="Hotel provider unavailable")
+                return self._partial_full_trip_response(params, flights, hotel_checkout_date, "error")
             
             if not hotels:
-                return {"messages": [AIMessage(content=f"I found flights but couldn't find hotels in {hotel_location}.")]}
+                return self._partial_full_trip_response(params, flights, hotel_checkout_date, "empty")
 
-            if params.budget_amount is not None:
-                flights = [f for f in flights if quote_total(f, "flight", params) is not None]
-                hotels = [{**h, "total_price": float(total)} for h in hotels if (total := quote_total(h, "hotel", params)) is not None]
-                if not flights or not hotels:
-                    return self._quoted_response("Try different dates to find complete prices.", assessment(params, None))
-
-            # Find cheapest valid plan
-            plan = find_cheapest_plan(flights, hotels)
-            
-            if not plan:
-                return {"messages": [AIMessage(content=
-                    f"I found {len(flights)} flights and {len(hotels)} hotels, but couldn't find a valid combination.\n\n"
-                    f"This usually happens when hotel check-in times conflict with flight arrival. "
-                    f"Try an earlier departure or later check-in time."
-                )]}
-
-            summary = None
-            if params.budget_amount is not None:
-                total = quote_total(plan["flight"], "flight", params) + quote_total(plan["hotel"], "hotel", params)
-                summary = assessment(params, total)
-                if summary["status"] == "over":
-                    return self._quoted_response("Try different dates or raise your quoted-cost budget. I have not selected an over-budget trip.", summary)
-
-            # Search for activities (optional)
-            activities = []
-            try:
-                activities = await get_activities_via_a2a(hotel_location, "things to do")
-            except Exception as e:
-                logger.warning(f"Activity search failed: {e}")
-
-            # Format and return
-            response = self._format_travel_plan(plan, params, activities, hotel_checkout_date)
-            return {**self._quoted_response(response, summary),
-                    "recommendation": capture_recommendation(plan, params),
-                    "travel_result": travel_result("full_trip", params, flights=[plan["flight"]],
-                                                   hotels=[plan["hotel"]], activities=activities,
-                                                   hotel_checkout_date=hotel_checkout_date)}
+            emit("result", component="hotels", travel_result=travel_result(
+                "hotel_only", params, hotels=hotels, hotel_checkout_date=hotel_checkout_date))
+            return await self._complete_full_trip(params, flights, hotels, hotel_checkout_date, hotel_location)
             
         except Exception as e:
-            logger.error(f"Error during full trip search: {e}")
-            return {"messages": [AIMessage(content=f"I encountered an error: {str(e)}")]}
+            logger.exception("Error during full trip search: %s", e)
+            emit("error", component="trip", message="Trip search unavailable")
+            return self._quoted_response("The trip search could not finish. Please try again later.")
 
     async def _extract_travel_params(self, user_message: str) -> TravelSearchArgs:
         """
@@ -1512,15 +1614,23 @@ How can I help you plan your next adventure?"""
             "messages": [AIMessage(content=response)],
         }
 
-    async def serve_conversation(self, prompt: str, history: list, trip: dict, recommendation: dict | None = None) -> dict:
+    async def serve_conversation(self, prompt: str, history: list, trip: dict,
+                                 recommendation: dict | None = None,
+                                 partial_search: dict | None = None) -> dict:
         result = await self.graph.ainvoke({
             "messages": history[-12:] + [{"role": "user", "content": prompt}],
             "search_params": trip,
             "recommendation": recommendation,
+            "partial_search": partial_search,
         })
         for message in reversed(result.get("messages", [])):
             if isinstance(message, AIMessage) and message.content.strip():
-                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip), "budget_assessment": result.get("budget_assessment"), "recommendation": result.get("recommendation"), "travel_result": result.get("travel_result")}
+                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip),
+                        "budget_assessment": result.get("budget_assessment"),
+                        "recommendation": result.get("recommendation"),
+                        "travel_result": result.get("travel_result"),
+                        "partial_search": result.get("partial_search"),
+                        "retry_hotels": result.get("retry_hotels", False)}
         raise RuntimeError("No valid response generated")
 
     async def serve(self, prompt: str) -> str:

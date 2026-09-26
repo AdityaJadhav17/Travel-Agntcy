@@ -28,7 +28,12 @@ if sys.argv[1] == "seed":
     end = start + timedelta(days=3)
     selected = turn(recommendation_id, f"Plan Dallas to New York {start} to {end}")["recommendation"]
     assert selected["hotel"]["name"] == "Fixture Central Hotel", selected
-    probe.write_text(json.dumps({"id": conversation_id, "recommendation_id": recommendation_id, "recommendation": selected}), encoding="utf-8")
+    partial_id = str(uuid4())
+    partial = turn(partial_id, f"Plan Dallas to New York with transient hotel {uuid4()} {start} to {end}")
+    assert partial["travel_result"]["kind"] == "flight_only", partial
+    assert partial["retry_hotels"] is True, partial
+    probe.write_text(json.dumps({"id": conversation_id, "recommendation_id": recommendation_id,
+                                 "recommendation": selected, "partial_id": partial_id}), encoding="utf-8")
 elif sys.argv[1] == "verify":
     saved_probe = json.loads(probe.read_text(encoding="utf-8"))
     conversation_id = saved_probe["id"]
@@ -45,6 +50,12 @@ elif sys.argv[1] == "verify":
     replaced = turn(saved_probe["recommendation_id"], "Keep the flights, change the hotel")
     assert replaced["recommendation"]["flight"]["id"] == saved_probe["recommendation"]["flight"]["id"], replaced
     assert replaced["recommendation"]["hotel"]["name"] == "Fixture Riverside Hotel", replaced
+    retried = turn(saved_probe["partial_id"], "Retry hotels")
+    assert retried["travel_result"]["kind"] == "full_trip", retried
+    assert retried["travel_result"]["total_usd"] == 540, retried
+    assert retried["partial_search"] is None, retried
+    with urllib.request.urlopen(urllib.request.Request(f"http://localhost:8000/conversations/{saved_probe['partial_id']}", method="DELETE")) as response:
+        assert response.status == 204
     with urllib.request.urlopen(urllib.request.Request(f"http://localhost:8000/conversations/{saved_probe['recommendation_id']}", method="DELETE")) as response:
         assert response.status == 204
     with urllib.request.urlopen(urllib.request.Request(f"http://localhost:8000/conversations/{conversation_id}", method="DELETE")) as response:
