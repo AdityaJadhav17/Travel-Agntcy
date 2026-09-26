@@ -21,7 +21,7 @@ import asyncio
 import json
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from pydantic import BaseModel, Field, ValidationError
 from langchain_core.prompts import PromptTemplate
@@ -35,8 +35,8 @@ from agents.supervisors.travel.graph.tools import get_flights_via_a2a, get_hotel
 from agents.travel.travel_logic import find_cheapest_plan
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
-from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, explain_recommendation, quote_facts
-from agents.supervisors.travel.graph.travel_results import travel_result, airport_comparison_result
+from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, capture_flight_recommendation, explain_recommendation, quote_facts
+from agents.supervisors.travel.graph.travel_results import travel_result, airport_comparison_result, date_comparison_result
 from agents.supervisors.travel.graph.nearby_airports import airport_catalog, nearby_arrivals, NearbyAirport
 from agents.supervisors.travel.graph.partial_searches import PartialSearch, retain_flights
 from agents.supervisors.travel.graph.progress import emit
@@ -63,7 +63,7 @@ class NodeStates:
     EXPLAIN = "explain_recommendation"
     HOTEL_CHANGE = "change_hotel"
     HOTEL_RETRY = "retry_hotels"
-    DATE_CLARIFY = "clarify_dates"
+    DATE_COMPARE = "compare_dates"
     REFLECTION = "reflection"
 
 
@@ -149,7 +149,7 @@ class TravelGraph:
         workflow.add_node(NodeStates.EXPLAIN, self._explain_recommendation_node)
         workflow.add_node(NodeStates.HOTEL_CHANGE, self._change_hotel_node)
         workflow.add_node(NodeStates.HOTEL_RETRY, self._retry_hotels_node)
-        workflow.add_node(NodeStates.DATE_CLARIFY, self._clarify_dates_node)
+        workflow.add_node(NodeStates.DATE_COMPARE, self._compare_dates_node)
         workflow.add_node(NodeStates.REFLECTION, self._reflection_node)
 
         # --- 2. Define the Agentic Workflow ---
@@ -165,7 +165,7 @@ class TravelGraph:
                 NodeStates.EXPLAIN: NodeStates.EXPLAIN,
                 NodeStates.HOTEL_CHANGE: NodeStates.HOTEL_CHANGE,
                 NodeStates.HOTEL_RETRY: NodeStates.HOTEL_RETRY,
-                NodeStates.DATE_CLARIFY: NodeStates.DATE_CLARIFY,
+                NodeStates.DATE_COMPARE: NodeStates.DATE_COMPARE,
             },
         )
 
@@ -177,7 +177,7 @@ class TravelGraph:
         workflow.add_edge(NodeStates.EXPLAIN, END)
         workflow.add_edge(NodeStates.HOTEL_CHANGE, END)
         workflow.add_edge(NodeStates.HOTEL_RETRY, END)
-        workflow.add_edge(NodeStates.DATE_CLARIFY, END)
+        workflow.add_edge(NodeStates.DATE_COMPARE, END)
 
         # Reflection decides whether to continue or end
         workflow.add_conditional_edges(
@@ -211,14 +211,15 @@ class TravelGraph:
         if isinstance(latest, str) and latest.strip().lower().rstrip("?.!") == "retry hotels":
             return {"next_node": NodeStates.HOTEL_RETRY}
         if isinstance(latest, str) and latest.strip().lower().rstrip("?.!") in {
-            "why this one", "why this trip", "why did you choose this", "explain this recommendation",
+            "why this one", "why this trip", "why this flight", "why that flight",
+            "why did you choose this", "explain this recommendation", "explain this flight",
         }:
             return {"next_node": NodeStates.EXPLAIN}
         normalized = " ".join(re.sub(r"[,?.!]", " ", latest.lower()).split()) if isinstance(latest, str) else ""
         mixed = self._mixed_explanation_request(normalized)
         explanation = explain_recommendation(state.get("recommendation")) if mixed else ""
-        if self._needs_date_choice(normalized, state.get("search_params")):
-            return {"next_node": NodeStates.DATE_CLARIFY, "explanation_prefix": explanation}
+        if self._wants_flexible_dates(normalized, state.get("search_params")):
+            return {"next_node": NodeStates.DATE_COMPARE, "explanation_prefix": explanation}
         if normalized in {
             "keep the flights change the hotel", "keep my flights change the hotel",
             "keep the flight change the hotel", "keep my flight change the hotel",
@@ -240,8 +241,8 @@ Based on the user's message, respond with ONE of these options:
   hotel/amenity, use travel_search so those details can be extracted first.
   A request that also asks why the saved trip was chosen is still change_hotel
   when the only action is a simple hotel swap.
-- 'explain_recommendation' - only when the user asks why a previous trip was chosen,
-  how its saved cost was calculated, or what criteria selected that recommendation.
+- 'explain_recommendation' - only when the user asks why a previous trip or flight
+  option was chosen, how its saved cost was calculated, or what criteria selected it.
   Do not use this for new searches, changed constraints, refreshed availability,
   mixed explanation-and-change requests, or general destination advice.
 - 'travel_search' - if the user is asking about:
@@ -320,7 +321,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         return asks_why and asks_action
 
     @staticmethod
-    def _needs_date_choice(message: str, saved_trip: dict | None) -> bool:
+    def _wants_flexible_dates(message: str, saved_trip: dict | None) -> bool:
         if (not saved_trip or not saved_trip.get("start_date") or
                 saved_trip.get("search_type", "full_trip") not in ("flight_only", "full_trip")):
             return False
@@ -342,12 +343,85 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         )
         return has_specific_date is None
 
-    @staticmethod
-    def _clarify_dates_node(state: GraphState) -> dict:
-        response = ("I can compare flights on specific alternative dates, but I can't scan an entire "
-                    "flexible-date calendar. Which departure and return dates would you like me to check? "
-                    "For a one-way trip, just give me the departure date.")
-        return {"messages": [AIMessage(content=response)], "full_response": response}
+    async def _compare_dates_node(self, state: GraphState) -> dict:
+        """Price the saved route on up to seven dates without changing the trip."""
+        try:
+            trip = TravelSearchArgs.model_validate(state.get("search_params") or {})
+            start = date.fromisoformat(trip.start_date)
+            returned = date.fromisoformat(trip.end_date) if not trip.is_one_way else None
+        except (ValidationError, ValueError, TypeError):
+            return self._quoted_response(
+                "I need a saved flight search with valid dates before I can compare nearby dates. "
+                "What route and dates should I start with?")
+        if not trip.origin or not trip.destination or (not trip.is_one_way and not returned):
+            return self._quoted_response(
+                "I need the origin, destination, and departure and return dates before comparing fares.")
+        if returned and returned <= start:
+            return self._quoted_response(
+                "The saved return date must be after departure. What return date should I use?")
+
+        dates = [(start + timedelta(days=offset),
+                  returned + timedelta(days=offset) if returned else None)
+                 for offset in range(-3, 4) if start + timedelta(days=offset) >= date.today()]
+        if not dates:
+            return self._quoted_response("Those saved travel dates are in the past. What new dates should I check?")
+        emit("status", component="flights", message="Comparing fares across nearby dates")
+        semaphore = asyncio.Semaphore(3)
+
+        async def search(departure, return_date):
+            async with semaphore:
+                try:
+                    flights = await asyncio.wait_for(get_flights_via_a2a(
+                        trip.origin, trip.destination, departure.isoformat(),
+                        return_date.isoformat() if return_date else None,
+                        is_one_way=trip.is_one_way, party=trip,
+                    ), timeout=PROVIDER_TIMEOUT_SECONDS)
+                except (Exception, asyncio.TimeoutError):
+                    logger.warning("Date comparison search unavailable for %s", departure)
+                    return None
+            matching = []
+            for flight in flights:
+                if (flight.get("departure_code") != trip.origin or
+                        flight.get("arrival_code") != trip.destination or
+                        str(flight.get("departure_time", ""))[:10] != departure.isoformat()):
+                    continue
+                if return_date:
+                    inbound = flight.get("return_flight") or {}
+                    if (inbound.get("departure_code") != trip.destination or
+                            inbound.get("arrival_code") != trip.origin or
+                            str(inbound.get("departure_time", ""))[:10] != return_date.isoformat()):
+                        continue
+                price = quote_total(flight, "flight", trip)
+                if price is not None:
+                    matching.append((flight, price))
+            if not matching:
+                return None
+            quote, price = min(matching, key=lambda item: item[1])
+            return departure.isoformat(), return_date.isoformat() if return_date else "", quote, price
+
+        quoted = [item for item in await asyncio.gather(*(search(*pair) for pair in dates)) if item]
+        if not quoted:
+            return self._quoted_response(
+                f"I checked {len(dates)} nearby date option(s) for {trip.origin} to {trip.destination}, "
+                "but couldn't verify a complete USD fare. Try another date range.")
+        result = date_comparison_result(trip, quoted)
+        baseline = result["base_fare_usd"]
+        lines = [f"**Nearby-date airfare comparison: {trip.origin} → {trip.destination}**",
+                 f"Checked {len(dates)} date option(s) within three days of {trip.start_date}. "
+                 + ("Round-trip return moved by the same number of days." if returned else "One-way fares."),
+                 (f"Fresh fare for the original date: USD {baseline:.2f}." if baseline is not None else
+                  "No complete fare was returned for the original date, so savings cannot be verified.")]
+        for option in result["date_alternatives"]:
+            difference = (f" · USD {option['savings_usd']:.2f} lower airfare" if
+                          option["savings_usd"] is not None and option["savings_usd"] > 0 else "")
+            lines.append(f"- {option['departure_date']}" +
+                         (f" to {option['return_date']}" if option["return_date"] else "") +
+                         f": USD {option['fare_usd']:.2f} · {option['flight']['airline']}{difference}")
+        lines.append(result["notice"])
+        response = "\n\n".join(lines[:3]) + "\n" + "\n".join(lines[3:])
+        emit("result", component="flights", travel_result=result)
+        return {"messages": [AIMessage(content=response)], "full_response": response,
+                "travel_result": result}
 
     @staticmethod
     def _nearby_arrival_request(message: str) -> bool:
@@ -466,6 +540,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     + problem + " No flight + hotel total is verified." + retry)
         return {**TravelGraph._quoted_response(response),
                 "travel_result": travel_result("flight_only", params, flights=flights),
+                "recommendation": capture_flight_recommendation(flights, params),
                 "partial_search": saved, "retry_hotels": saved is not None}
 
     async def _complete_full_trip(self, params, flights, hotels, checkout, location):
@@ -799,7 +874,8 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             emit("result", component="flights", travel_result=travel_result(
                 "flight_only", params, flights=flights))
             return {**self._quoted_response(response, summary),
-                    "travel_result": travel_result("flight_only", params, flights=flights)}
+                    "travel_result": travel_result("flight_only", params, flights=flights),
+                    "recommendation": capture_flight_recommendation(flights, params)}
             
         except Exception as e:
             logger.error(f"Error searching flights: {e}")

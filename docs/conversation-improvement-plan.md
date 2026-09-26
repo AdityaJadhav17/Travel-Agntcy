@@ -351,9 +351,29 @@ When a traveler asks why a saved full-trip recommendation was selected and also
 asks to change it, the response explains the saved quote from retained facts,
 then handles the new request. A change or clarification still clears the old
 selection so it cannot be mistaken for the new quote. A simple hotel swap keeps
-its focused replacement route. Broad requests for "cheaper dates" pause before
-provider searches and ask for specific alternative dates; the saved trip and
-previous quote remain available until the traveler supplies them. The app does
-not claim to scan a flexible-date calendar or know the cheapest dates without
-checking actual quotes. Explanations still require a saved full-trip selection;
-flight-only lists do not yet retain a selected quote for this purpose.
+its focused replacement route.
+
+Broad requests for "cheaper dates" now search the saved flight route on up to
+seven departure dates (three days before through three days after), with at most
+three searches in flight at once and a 20-second timeout per date. Round-trip
+returns shift by the same number of days, preserving trip length. The original
+date is re-queried for a fresh comparison baseline; only complete USD itineraries
+with matching routes and travel dates appear. If that baseline is unavailable,
+the app shows fares without claiming savings. Past dates are skipped. The saved
+trip and previous recommendation remain available; only airfare is compared,
+so full-trip hotel and activity costs are not repriced.
+
+Flight-only searches now retain the lowest complete USD fare among the five
+displayed options, including its itinerary, option number and search time.
+"Why this flight?" explains the actual ranking and quote without another provider
+search, including after an API restart. It does not claim the option is cheapest
+outside those displayed, or that current availability is confirmed. Flight-only
+facts share the existing versioned recommendation storage; legacy full-trip
+snapshots remain readable.
+
+Docker verification: 162 backend tests pass with 96.57% branch-inclusive
+coverage across the gated modules. Ruff, frontend lint, formatting, typecheck
+and production build pass. All 30 Chromium/Firefox journeys pass, including
+flight-only explanation after reload and a seven-date comparison through the
+API, A2A agents and fixture provider. These tests do not measure live-provider
+fare coverage or guarantee the least expensive dates outside the checked window.

@@ -41,6 +41,14 @@ export interface AirportAlternativeCard {
   flight: FlightCard
 }
 
+export interface DateAlternativeCard {
+  departure_date: string
+  return_date: string
+  fare_usd: number
+  savings_usd: number | null
+  flight: FlightCard
+}
+
 export interface TravelResult {
   version: 1
   kind:
@@ -49,6 +57,7 @@ export interface TravelResult {
     | "hotel_only"
     | "activity_only"
     | "airport_comparison"
+    | "date_comparison"
   searched_at: string
   origin: string
   destination: string
@@ -64,6 +73,8 @@ export interface TravelResult {
   requested_airport?: string
   requested_fare_usd?: number | null
   airport_alternatives?: AirportAlternativeCard[]
+  base_fare_usd?: number | null
+  date_alternatives?: DateAlternativeCard[]
   total_usd: number | null
   notice: string
 }
@@ -151,6 +162,23 @@ const airportAlternative = (
   )
 }
 
+const dateAlternative = (value: unknown): value is DateAlternativeCard => {
+  if (!record(value)) return false
+  return (
+    text(value.departure_date) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value.departure_date) &&
+    text(value.return_date) &&
+    (value.return_date === "" ||
+      /^\d{4}-\d{2}-\d{2}$/.test(value.return_date)) &&
+    typeof value.fare_usd === "number" &&
+    price(value.fare_usd) &&
+    (value.savings_usd === null ||
+      (typeof value.savings_usd === "number" &&
+        Number.isFinite(value.savings_usd))) &&
+    flight(value.flight)
+  )
+}
+
 /** Unknown versions and malformed saved data use the existing text renderer. */
 export function parseTravelResult(value: unknown): TravelResult | null {
   if (!record(value) || value.version !== 1) return null
@@ -159,7 +187,8 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     value.kind !== "flight_only" &&
     value.kind !== "hotel_only" &&
     value.kind !== "activity_only" &&
-    value.kind !== "airport_comparison"
+    value.kind !== "airport_comparison" &&
+    value.kind !== "date_comparison"
   )
     return null
   if (
@@ -207,6 +236,15 @@ export function parseTravelResult(value: unknown): TravelResult | null {
       value.airport_alternatives.length < 1 ||
       value.airport_alternatives.length > 7 ||
       !value.airport_alternatives.every(airportAlternative))
+  )
+    return null
+  if (
+    value.kind === "date_comparison" &&
+    (!price(value.base_fare_usd) ||
+      !Array.isArray(value.date_alternatives) ||
+      value.date_alternatives.length < 1 ||
+      value.date_alternatives.length > 7 ||
+      !value.date_alternatives.every(dateAlternative))
   )
     return null
   return value as unknown as TravelResult

@@ -59,6 +59,19 @@ class Recommendation(BaseModel):
     min_location_rating: float
 
 
+class FlightRecommendation(BaseModel):
+    """The lowest complete USD fare among the displayed flight-only options."""
+
+    version: Literal[3] = 3
+    kind: Literal["flight_only"] = "flight_only"
+    searched_at: datetime
+    trip: TravelSearchArgs
+    flight: QuoteFacts
+    itinerary: FlightItinerary
+    option_number: int = Field(ge=1, le=5)
+    priced_options_checked: int = Field(ge=1, le=5)
+
+
 def clean_text(value):
     # Provider labels are data, including when rendered as Markdown by the UI.
     return re.sub(r"[<>\[\]*_`&]", "", " ".join(str(value or "Not supplied").split()))[:160]
@@ -108,9 +121,72 @@ def capture_recommendation(plan, trip):
     ).model_dump(mode="json")
 
 
+def capture_flight_recommendation(flights, trip):
+    """Save a specific displayed option, without assuming the first is cheapest."""
+    priced = [(index, quote, quote_total(quote, "flight", trip))
+              for index, quote in enumerate(list(flights)[:5], 1)]
+    priced = [(index, quote, price) for index, quote, price in priced
+              if price is not None and (trip.is_one_way or quote.get("return_flight"))
+              if not quote.get("departure_code") or quote["departure_code"] == trip.origin
+              if not quote.get("arrival_code") or quote["arrival_code"] == trip.destination]
+    if not priced:
+        return None
+    valid = []
+    for index, quote, price in priced:
+        try:
+            valid.append((index, quote_facts(quote, "flight", trip),
+                          FlightItinerary.model_validate(quote), price))
+        except ValidationError:
+            continue
+    if not valid:
+        return None
+    index, facts, itinerary, _ = min(valid, key=lambda item: (item[3], item[0]))
+    return FlightRecommendation(
+        searched_at=datetime.now(timezone.utc), trip=trip, flight=facts,
+        itinerary=itinerary, option_number=index, priced_options_checked=len(valid),
+    ).model_dump(mode="json")
+
+
+def explain_flight_recommendation(saved):
+    rec = FlightRecommendation.model_validate(saved)
+    flight, trip = rec.flight, rec.trip
+    outbound = rec.itinerary
+    lines = [
+        "**Why this flight?**",
+        f"From the saved search on {rec.searched_at.strftime('%Y-%m-%d %H:%M UTC')}, "
+        f"Option {rec.option_number} was the lowest complete USD fare among "
+        f"{rec.priced_options_checked} priced displayed option(s).",
+        "I interpreted 'this flight' as the lowest priced displayed option.",
+        f"Route: {clean_text(trip.origin)} to {clean_text(trip.destination)}; "
+        f"departure {clean_text(trip.start_date)}" +
+        (f", return {clean_text(trip.end_date)}." if not trip.is_one_way else " (one-way)."),
+        f"- Airline: {flight.name}; saved airfare: USD {flight.total_usd:.2f}.",
+        f"- Outbound: {clean_text(outbound.departure_time)} to "
+        f"{clean_text(outbound.arrival_time)}; {outbound.stops} stop(s).",
+    ]
+    if outbound.return_flight:
+        returned = outbound.return_flight
+        lines.append(f"- Return: {clean_text(returned.departure_time)} to "
+                     f"{clean_text(returned.arrival_time)}; {returned.stops} stop(s).")
+    lines.extend([
+        "Only complete USD fares among the displayed options were ranked by airfare. "
+        "Stops, timing, baggage and ground transport were not price-adjusted.",
+        "This is a saved quote, not refreshed availability or a booking. "
+        "Prices and fees can change before purchase.",
+    ])
+    return "\n\n".join(lines)
+
+
 def explain_recommendation(saved):
     if not saved:
-        return "I don't have a saved full-trip recommendation in this chat yet. Ask me to find a flight and hotel first, then ask why I chose them."
+        return "I don't have a saved flight or full-trip recommendation in this chat yet. Ask me to search first, then ask why I chose an option."
+    if not isinstance(saved, dict):
+        return "I can't reliably read the saved recommendation. Please search again before asking me to explain it."
+    if saved.get("version") == 3 and saved.get("kind") == "flight_only":
+        try:
+            return explain_flight_recommendation(saved)
+        except (ValidationError, TypeError):
+            return "I can't reliably read the saved flight quote. Please search again before asking me to explain it."
     try:
         rec = Recommendation.model_validate(saved)
     except ValidationError:

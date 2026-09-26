@@ -22,6 +22,7 @@ export default function StructuredTravelResultCard({
     hotel_only: "Hotels",
     activity_only: "Things to do",
     airport_comparison: "Nearby arrival airports",
+    date_comparison: "Nearby travel dates",
   }[result.kind]
 
   return (
@@ -118,6 +119,39 @@ export default function StructuredTravelResultCard({
                 {option.flight.airline} · {stops(option.flight.stops)} ·{" "}
                 {option.flight.departure_time} → {option.flight.arrival_time}
               </p>
+            </article>
+          ))}
+        </div>
+      )}
+      {result.kind === "date_comparison" && (
+        <div className="space-y-2">
+          <p className="text-sm text-gray-200">
+            Original date: {result.start_date} · Fresh airfare:{" "}
+            {usd(result.base_fare_usd ?? null)}
+          </p>
+          {result.date_alternatives?.map((option) => (
+            <article
+              key={option.departure_date + option.return_date}
+              className="rounded-xl border border-gray-700 bg-[#252525] p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <h4 className="font-semibold text-white">
+                  {option.departure_date}
+                  {option.return_date && " to " + option.return_date}
+                </h4>
+                <p className="font-semibold text-emerald-200">
+                  {usd(option.fare_usd)} airfare
+                </p>
+              </div>
+              <p className="text-sm text-gray-300">
+                {option.flight.airline} · {stops(option.flight.stops)} ·{" "}
+                {option.flight.departure_time} → {option.flight.arrival_time}
+              </p>
+              {option.savings_usd !== null && option.savings_usd > 0 && (
+                <p className="mt-1 text-sm text-emerald-200">
+                  {usd(option.savings_usd)} lower airfare than the original date
+                </p>
+              )}
             </article>
           ))}
         </div>

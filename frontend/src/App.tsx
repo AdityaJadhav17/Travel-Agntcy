@@ -550,6 +550,31 @@ const App: React.FC = () => {
                                   Compare nearby arrival airports
                                 </button>
                               )}
+                            {(msg.travel_result?.kind === "flight_only" ||
+                              msg.travel_result?.kind === "full_trip") &&
+                              index === conversationMessages.length - 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUserInput("Compare cheaper dates")
+                                  }
+                                  className="ml-2 mt-3 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
+                                >
+                                  Compare cheaper dates
+                                </button>
+                              )}
+                            {msg.travel_result?.kind === "flight_only" &&
+                              index === conversationMessages.length - 1 && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleUserInput("Why this flight?")
+                                  }
+                                  className="ml-2 mt-3 rounded-lg border border-emerald-400 px-3 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-400/10"
+                                >
+                                  Why this flight?
+                                </button>
+                              )}
                           </div>
                         </div>
                       )}

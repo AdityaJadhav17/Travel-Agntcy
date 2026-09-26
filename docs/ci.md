@@ -57,6 +57,9 @@ totals, retained recommendation explanations, and both overlapping and completed
 retries. The process-restart probe checks retained recommendation facts, a
 selective hotel replacement and family conversation state. Dates are generated
 in the future.
+The browser journeys also verify a saved flight-only explanation and a bounded
+nearby-date airfare comparison after reload, using fixture fares through the
+real API and flight agent.
 The scored conversation evaluation runs after the API restart and gates CI on
 ten deterministic scenarios, including nearby-airport comparisons. Its artifact,
 `.runtime/ci/conversation-eval.json`,

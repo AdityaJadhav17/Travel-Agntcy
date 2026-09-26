@@ -60,9 +60,17 @@ class AirportAlternativeCard(BaseModel):
     flight: FlightCard
 
 
+class DateAlternativeCard(BaseModel):
+    departure_date: str = Field(min_length=10, max_length=10)
+    return_date: str = Field(default="", max_length=10)
+    fare_usd: float = Field(gt=0, allow_inf_nan=False)
+    savings_usd: float | None = Field(default=None, allow_inf_nan=False)
+    flight: FlightCard
+
+
 class TravelResult(BaseModel):
     version: Literal[1] = 1
-    kind: Literal["full_trip", "flight_only", "hotel_only", "activity_only", "airport_comparison"]
+    kind: Literal["full_trip", "flight_only", "hotel_only", "activity_only", "airport_comparison", "date_comparison"]
     searched_at: datetime
     origin: str = Field(default="", max_length=160)
     destination: str = Field(default="", max_length=160)
@@ -78,6 +86,8 @@ class TravelResult(BaseModel):
     requested_airport: str = Field(default="", max_length=3)
     requested_fare_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     airport_alternatives: list[AirportAlternativeCard] = Field(default_factory=list, max_length=7)
+    base_fare_usd: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    date_alternatives: list[DateAlternativeCard] = Field(default_factory=list, max_length=7)
     total_usd: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     notice: str = Field(default="", max_length=240)
 
@@ -89,6 +99,7 @@ class TravelResult(BaseModel):
             "hotel_only": (self.hotels,),
             "activity_only": (self.activities,),
             "airport_comparison": (self.airport_alternatives,),
+            "date_comparison": (self.date_alternatives,),
         }[self.kind]
         if not all(required):
             raise ValueError("A successful result needs its searched options")
@@ -201,4 +212,30 @@ def airport_comparison_result(trip: TravelSearchArgs, target, quoted):
         adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
         requested_airport=target.code, requested_fare_usd=baseline,
         airport_alternatives=alternatives, notice=notice,
+    ).model_dump(mode="json")
+
+
+def date_comparison_result(trip: TravelSearchArgs, quoted):
+    """Show verified fares for shifted dates, with a fresh baseline when found."""
+    baseline = next((float(price) for departure, _, _, price in quoted
+                     if departure == trip.start_date), None)
+    alternatives = []
+    for departure, returned, quote, price in quoted:
+        option_trip = trip.model_copy(update={"start_date": departure, "end_date": returned})
+        alternatives.append(DateAlternativeCard(
+            departure_date=departure, return_date=returned or "",
+            fare_usd=float(price),
+            savings_usd=round(baseline - float(price), 2) if baseline is not None else None,
+            flight=_flight(quote, option_trip),
+        ))
+    alternatives.sort(key=lambda option: (option.fare_usd, option.departure_date))
+    notice = ("Airfare only for the requested travelers. Round-trip options shift departure "
+              "and return together, keeping the same trip length. Hotel, activities, "
+              "baggage and transfers are not repriced. Confirm fares before booking.")
+    return TravelResult(
+        kind="date_comparison", searched_at=datetime.now(timezone.utc),
+        origin=clean_text(trip.origin), destination=clean_text(trip.destination_city or trip.destination),
+        start_date=trip.start_date or "", end_date=trip.end_date or "",
+        adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
+        base_fare_usd=baseline, date_alternatives=alternatives, notice=notice,
     ).model_dump(mode="json")

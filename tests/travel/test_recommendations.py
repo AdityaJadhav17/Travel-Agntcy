@@ -16,7 +16,7 @@ from agents.supervisors.travel import main
 from agents.supervisors.travel.conversations import ConversationConflict, ConversationStore
 from agents.supervisors.travel.graph.graph import TravelGraph
 from agents.supervisors.travel.graph.models import TravelSearchArgs
-from agents.supervisors.travel.graph.recommendations import capture_recommendation, explain_recommendation, quote_facts
+from agents.supervisors.travel.graph.recommendations import capture_recommendation, capture_flight_recommendation, explain_recommendation, quote_facts
 from agents.travel.travel_logic import find_cheapest_plan
 
 
@@ -214,19 +214,50 @@ def test_mixed_explanation_and_change_answers_both_without_stale_selection(monke
     assert answer["recommendation"] is None
 
 
-def test_cheaper_dates_question_preserves_quote_until_dates_are_given(monkeypatch):
+def test_cheaper_dates_searches_bounded_window_and_preserves_saved_trip(monkeypatch):
     graph = TravelGraph()
-    extractor = AsyncMock(side_effect=AssertionError("No search without specific dates"))
-    monkeypatch.setattr(graph, "_extract_travel_params", extractor)
+    start = date.today() + timedelta(days=50)
+    current = trip(start_date=str(start), end_date=str(start + timedelta(days=3)))
+    seen = []
+
+    async def flights(origin, destination, outbound, inbound, **kwargs):
+        seen.append((origin, destination, outbound, inbound, kwargs["party"].adults))
+        offset = (date.fromisoformat(outbound) - start).days
+        if offset == 2:
+            raise RuntimeError("provider unavailable")
+        if offset == 3:
+            return []
+        fare = {0: 500, -1: 400}.get(offset, 540)
+        quote = {
+            "airline": "Verified Air", "currency": "USD", "price": fare,
+            "departure_code": origin, "arrival_code": destination,
+            "departure_time": outbound + " 10:00", "arrival_time": outbound + " 13:00",
+            "return_flight": {"departure_code": destination, "arrival_code": origin,
+                              "departure_time": inbound + " 10:00", "arrival_time": inbound + " 13:00"},
+        }
+        if offset == -2:
+            quote["currency"] = "EUR"
+        if offset == -3:
+            quote["arrival_code"] = "BOS"
+        return [quote]
+
+    monkeypatch.setattr("agents.supervisors.travel.graph.graph.get_flights_via_a2a", flights)
     saved = snapshot()
     answer = asyncio.run(graph.serve_conversation(
-        "Why this one, and show me cheaper dates?", [], trip().model_dump(), saved,
+        "Why this one, and show me cheaper dates?", [], current.model_dump(), saved,
     ))
     assert "USD 540.00" in answer["response"]
-    assert "Which departure and return dates" in answer["response"]
+    assert "USD 100.00 lower airfare" in answer["response"]
     assert answer["recommendation"] == saved
-    extractor.assert_not_awaited()
-    assert not graph._needs_date_choice("Try cheaper dates on November 2-5", trip().model_dump())
+    assert answer["trip_state"] == current.model_dump()
+    assert answer["travel_result"]["kind"] == "date_comparison"
+    assert answer["travel_result"]["base_fare_usd"] == 500
+    assert len(seen) == 7 and all(item[0:2] == ("DFW", "JFK") and item[4] == 1 for item in seen)
+    assert all((date.fromisoformat(item[3]) - date.fromisoformat(item[2])).days == 3 for item in seen)
+    assert {option["departure_date"] for option in answer["travel_result"]["date_alternatives"]} == {
+        str(start + timedelta(days=offset)) for offset in (-1, 0, 1)
+    }
+    assert not graph._wants_flexible_dates("Try cheaper dates on November 2-5", current.model_dump())
 
 
 def test_mixed_explanation_and_simple_hotel_change_uses_swap_route():
@@ -239,6 +270,94 @@ def test_mixed_explanation_and_simple_hotel_change_uses_swap_route():
     assert result["next_node"] == "change_hotel"
     assert "USD 540.00" in result["explanation_prefix"]
     assert not graph._mixed_explanation_request("show me why this trip was chosen")
-    assert not graph._needs_date_choice(
+    assert not graph._wants_flexible_dates(
         "show cheaper dates", trip(search_type="hotel_only").model_dump(),
     )
+
+
+def test_flight_only_explanation_uses_lowest_displayed_usd_quote():
+    params = trip(search_type="flight_only", budget_amount=None)
+    first = {"airline": "First Air", "price": 550, "currency": "USD", "stops": 0,
+             "departure_time": params.start_date + " 09:00", "arrival_time": params.start_date + " 13:00",
+             "return_flight": {"airline": "First Air", "departure_time": params.end_date + " 10:00",
+                               "arrival_time": params.end_date + " 14:00", "stops": 0}}
+    second = {**first, "airline": "Lower Air", "price": 420, "stops": 1}
+    saved = capture_flight_recommendation([
+        first, second, {**first, "currency": "EUR"},
+        {**first, "price": 100, "arrival_code": "BOS"},
+    ], params)
+    assert saved["version"] == 3 and saved["option_number"] == 2
+    explanation = explain_recommendation(saved)
+    assert "Option 2" in explanation and "USD 420.00" in explanation
+    assert "lowest complete USD fare among 2 priced displayed" in explanation
+    assert "not refreshed availability" in explanation
+    assert capture_flight_recommendation([{**first, "return_flight": None}], params) is None
+
+
+def test_flight_only_explanation_survives_api_restart(tmp_path, monkeypatch):
+    store = ConversationStore(tmp_path / "flights.sqlite3")
+    monkeypatch.setattr(main, "conversation_store", store)
+    graph = TravelGraph()
+    graph.supervisor_llm = RunnableLambda(lambda _: AIMessage(content="travel_search"))
+    params = trip(search_type="flight_only", budget_amount=None)
+    extract = AsyncMock(return_value=params)
+    monkeypatch.setattr(graph, "_extract_travel_params", extract)
+    flight = {"airline": "Saved Air", "price": 240, "currency": "USD", "stops": 1,
+              "departure_time": params.start_date + " 09:00", "arrival_time": params.start_date + " 13:00",
+              "return_flight": {"airline": "Saved Air", "departure_time": params.end_date + " 10:00",
+                                "arrival_time": params.end_date + " 14:00", "stops": 0}}
+    search = AsyncMock(return_value=[flight])
+    monkeypatch.setattr("agents.supervisors.travel.graph.graph.get_flights_via_a2a", search)
+    monkeypatch.setattr(main, "travel_graph", graph)
+    conversation_id = str(uuid4())
+
+    def payload(prompt):
+        return {"prompt": prompt, "conversation_id": conversation_id, "request_id": str(uuid4())}
+
+    with TestClient(main.app) as client:
+        first = client.post("/agent/prompt", json=payload("Find flights"))
+        assert first.status_code == 200
+        assert first.json()["recommendation"]["version"] == 3
+        monkeypatch.setattr(main, "conversation_store", ConversationStore(store.path))
+        monkeypatch.setattr(main, "travel_graph", TravelGraph())
+        why = client.post("/agent/prompt", json=payload("Why this flight?"))
+        assert why.status_code == 200
+        assert "USD 240.00" in why.json()["response"]
+        assert why.json()["recommendation"] == first.json()["recommendation"]
+        extract.assert_awaited_once()
+        search.assert_awaited_once()
+        assert client.delete(f"/conversations/{conversation_id}").status_code == 204
+        with store.connect() as db:
+            assert db.execute("SELECT count(*) FROM conversation_recommendations").fetchone()[0] == 0
+
+
+def test_one_way_date_comparison_skips_past_dates_and_does_not_invent_savings(monkeypatch):
+    start = date.today() + timedelta(days=1)
+    params = trip(search_type="flight_only", start_date=str(start), end_date=None,
+                  is_one_way=True, budget_amount=None)
+    seen = []
+
+    async def flights(origin, destination, departure, returned, **kwargs):
+        seen.append((departure, returned, kwargs["is_one_way"]))
+        return [{"airline": "One Way Air", "price": 180, "currency": "EUR" if departure == str(start) else "USD",
+                 "departure_code": origin, "arrival_code": destination,
+                 "departure_time": departure + " 10:00", "arrival_time": departure + " 13:00"}]
+
+    monkeypatch.setattr("agents.supervisors.travel.graph.graph.get_flights_via_a2a", flights)
+    result = asyncio.run(TravelGraph()._compare_dates_node({"search_params": params.model_dump()}))
+    card = result["travel_result"]
+    assert len(seen) == 5 and all(returned is None and one_way for _, returned, one_way in seen)
+    assert card["base_fare_usd"] is None
+    assert all(option["savings_usd"] is None and option["return_date"] == ""
+               for option in card["date_alternatives"])
+    assert "savings cannot be verified" in result["full_response"]
+
+
+def test_date_comparison_rejects_invalid_saved_return_without_provider_calls(monkeypatch):
+    search = AsyncMock(side_effect=AssertionError("Invalid dates must not reach provider"))
+    monkeypatch.setattr("agents.supervisors.travel.graph.graph.get_flights_via_a2a", search)
+    start = date.today() + timedelta(days=20)
+    params = trip(search_type="flight_only", start_date=str(start), end_date=str(start - timedelta(days=1)))
+    result = asyncio.run(TravelGraph()._compare_dates_node({"search_params": params.model_dump()}))
+    assert "return date must be after departure" in result["full_response"]
+    search.assert_not_awaited()

@@ -162,6 +162,38 @@ test("nearby arrival airports compare real fares and ground distance", async ({
   await expect(cards.getByText(/LAX · Los Angeles/)).toBeVisible()
 })
 
+test("flight explanation and nearby dates remain grounded after reload", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const initial = await send(
+    page,
+    `Flights only from Dallas to New York ${start} to ${end}`,
+  )
+  expect(initial.travel_result.kind).toBe("flight_only")
+  expect(initial.recommendation.version).toBe(3)
+  const response = page.waitForResponse((reply) =>
+    reply.url().endsWith("/agent/prompt/stream"),
+  )
+  await page.getByRole("button", { name: "Compare cheaper dates" }).click()
+  const compared = await streamResult(await response)
+  expect(compared.travel_result.kind).toBe("date_comparison")
+  expect(compared.travel_result.base_fare_usd).toBe(240)
+  expect(compared.travel_result.date_alternatives).toHaveLength(7)
+  expect(compared.trip_state.start_date).toBe(start)
+  expect(compared.recommendation).toEqual(initial.recommendation)
+  await expect(page.getByText("Nearby travel dates")).toBeVisible()
+
+  const why = await send(page, "Why this flight?")
+  expect(why.response).toContain("Option 1")
+  expect(why.response).toContain("USD 240.00")
+  await page.reload()
+  await page
+    .getByRole("button", { name: /Flights only from Dallas to New Yor/ })
+    .click()
+  await expect(page.getByText("Nearby travel dates")).toBeVisible()
+})
+
 test("hotel failure keeps flights and retries hotels after reload", async ({
   page,
 }) => {
@@ -234,7 +266,7 @@ test("explains a retained trip after reload and does not leak it to a new chat",
   const empty = await send(page, "Why this trip?")
   expect(empty.recommendation).toBeNull()
   await expect(
-    page.getByText(/don't have a saved full-trip recommendation/),
+    page.getByText(/don't have a saved flight or full-trip recommendation/),
   ).toBeVisible()
 })
 
