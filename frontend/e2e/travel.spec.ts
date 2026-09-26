@@ -18,6 +18,68 @@ async function send(page: Page, prompt: string) {
   return result.json()
 }
 
+test("structured cards survive rewritten narrative and reload", async ({
+  page,
+}) => {
+  await page.route("**/agent/prompt", async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    if (body.travel_result) {
+      await route.fulfill({
+        response,
+        json: { ...body, response: "Narrative wording changed after search." },
+      })
+    } else {
+      await route.fulfill({ response })
+    }
+  })
+  await page.goto("/")
+  await send(page, "Plan Dallas to New York")
+  const result = await send(page, `${start} to ${end}`)
+  expect(result.travel_result).toMatchObject({
+    version: 1,
+    kind: "full_trip",
+    total_usd: 540,
+  })
+  const cards = page.getByRole("region", { name: "Travel results" })
+  await expect(
+    cards.getByRole("heading", { name: "Fixture Air" }),
+  ).toBeVisible()
+  await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
+  await expect(
+    page.getByText("Narrative wording changed after search."),
+  ).toBeVisible()
+  await page.reload()
+  await page.getByRole("button", { name: "Plan Dallas to New York" }).click()
+  await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
+})
+
+test("unknown result versions fall back to the narrative", async ({ page }) => {
+  await page.route("**/agent/prompt", async (route) => {
+    const response = await route.fetch()
+    const body = await response.json()
+    await route.fulfill({
+      response,
+      json: body.travel_result
+        ? {
+            ...body,
+            travel_result: { ...body.travel_result, version: 2 },
+            response: "A future version result is still readable.",
+          }
+        : body,
+    })
+  })
+  await page.goto("/")
+  await send(page, "Plan Dallas to New York")
+  await send(page, `${start} to ${end}`)
+  await expect(
+    page.getByText("A future version result is still readable."),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("region", { name: "Travel results" }),
+  ).toHaveCount(0)
+})
+
 test("explains a retained trip after reload and does not leak it to a new chat", async ({
   page,
 }) => {

@@ -228,3 +228,27 @@ Docker verification: 132 backend tests and 18 Chromium/Firefox journeys pass.
 Branch-inclusive coverage across the gated modules is 98.78%; Ruff, frontend
 lint, formatting, types, production build, and an actual API restart with a
 hotel change all pass.
+
+### Structured travel result cards (US11)
+
+Successful conversation searches now return a versioned `travel_result` beside
+the existing natural-language response. The payload contains bounded flight, hotel and
+activity facts from the provider results after budget filtering, including full
+hotel stay prices and unknown-price states. Full-trip hotel replacement returns
+the retained flight and newly selected hotel. The browser validates version 1
+before rendering cards and saves it with chat history. Unknown versions, malformed
+data and older chats continue through the narrative renderer. The prose remains
+available as travel notes. General and legacy Markdown is rendered without raw
+HTML insertion.
+
+The contract is covered by Python tests and browser journeys that rewrite the
+response text while leaving quote data intact, reload the chat, and check the
+unknown-version fallback. This establishes the result payload needed by the
+planned typed progress events (US10); streaming and partial provider results are
+still separate work.
+
+Docker verification: 136 Python tests pass with 99.05% branch-inclusive
+coverage across the gated modules, including 100% for the result schema.
+Ruff and frontend lint, formatting, TypeScript and production build pass.
+All 22 Chromium/Firefox E2E journeys pass. The local Docker supervisor and UI
+were recreated and reported healthy.

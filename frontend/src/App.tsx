@@ -23,6 +23,7 @@ import { getGraphConfig } from "@/utils/graphConfigs"
 import { PATTERNS, PatternType } from "@/utils/patternUtils"
 import TravelResponseCard from "@/components/Chat/TravelResponseCard"
 import { BudgetAssessment } from "@/types/budget"
+import type { TravelResult } from "@/types/travelResult"
 import { Plane } from "lucide-react"
 
 interface ApiResponse {
@@ -31,12 +32,14 @@ interface ApiResponse {
   conversation_id?: string
   trip_state?: Record<string, unknown>
   budget_assessment?: BudgetAssessment | null
+  travel_result?: TravelResult | null
 }
 
 interface ConversationMessage {
   role: "user" | "assistant"
   content: string
   budget_assessment?: BudgetAssessment | null
+  travel_result?: TravelResult | null
 }
 
 export interface ChatHistoryItem {
@@ -208,6 +211,7 @@ const App: React.FC = () => {
         role: "assistant" as const,
         content: response.response,
         budget_assessment: response.budget_assessment,
+        travel_result: response.travel_result,
       },
     ]
     setChatHistory((previous) =>
@@ -433,6 +437,7 @@ const App: React.FC = () => {
                             <TravelResponseCard
                               content={msg.content}
                               budget={msg.budget_assessment}
+                              travelResult={msg.travel_result}
                             />
                           </div>
                         </div>

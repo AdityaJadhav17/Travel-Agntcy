@@ -35,6 +35,7 @@ from agents.travel.travel_logic import find_cheapest_plan
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
 from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, explain_recommendation, quote_facts
+from agents.supervisors.travel.graph.travel_results import travel_result
 from common.llm import get_llm
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
 
@@ -72,6 +73,7 @@ class GraphState(MessagesState):
     search_params: dict = {}
     budget_assessment: dict | None = None
     recommendation: dict | None = None
+    travel_result: dict | None = None
 
 
 @agent(name="travel_agent")
@@ -347,7 +349,11 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             "I searched hotels again for the same dates and travelers. Activities were not refreshed.\n\n"
             + response + "\n\n" + params.label("full_trip")
         )
-        return {**self._quoted_response(response, summary), "recommendation": capture_recommendation(plan, params)}
+        return {**self._quoted_response(response, summary),
+                "recommendation": capture_recommendation(plan, params),
+                "travel_result": travel_result("full_trip", params, flights=[plan["flight"]],
+                                               hotels=[plan["hotel"]],
+                                               notice="Selected flight retained; replacement hotels refreshed.")}
 
     async def _travel_search_node(self, state: GraphState) -> dict:
         """
@@ -474,7 +480,8 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 return {"messages": [AIMessage(content=f"I couldn't find any activities in {location}. Please try another location.")]}
             
             response = self._format_activities_only(activities, location)
-            return {"messages": [AIMessage(content=response)], "full_response": response}
+            return {"messages": [AIMessage(content=response)], "full_response": response,
+                    "travel_result": travel_result("activity_only", params, activities=activities)}
             
         except Exception as e:
             logger.error(f"Error searching activities: {e}")
@@ -520,7 +527,8 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 return {"messages": [AIMessage(content=f"I couldn't find any hotels in {location} for those dates. Please try different dates or another location.")]}
             
             response = self._format_hotels_only(hotels, location, params)
-            return self._quoted_response(response, summary)
+            return {**self._quoted_response(response, summary),
+                    "travel_result": travel_result("hotel_only", params, hotels=hotels)}
             
         except Exception as e:
             logger.error(f"Error searching hotels: {e}")
@@ -572,7 +580,8 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination} for {params.start_date}. Please try different dates.")]}
             
             response = self._format_flights_only(flights, params)
-            return self._quoted_response(response, summary)
+            return {**self._quoted_response(response, summary),
+                    "travel_result": travel_result("flight_only", params, flights=flights)}
             
         except Exception as e:
             logger.error(f"Error searching flights: {e}")
@@ -663,7 +672,11 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
 
             # Format and return
             response = self._format_travel_plan(plan, params, activities, hotel_checkout_date)
-            return {**self._quoted_response(response, summary), "recommendation": capture_recommendation(plan, params)}
+            return {**self._quoted_response(response, summary),
+                    "recommendation": capture_recommendation(plan, params),
+                    "travel_result": travel_result("full_trip", params, flights=[plan["flight"]],
+                                                   hotels=[plan["hotel"]], activities=activities,
+                                                   hotel_checkout_date=hotel_checkout_date)}
             
         except Exception as e:
             logger.error(f"Error during full trip search: {e}")
@@ -1507,7 +1520,7 @@ How can I help you plan your next adventure?"""
         })
         for message in reversed(result.get("messages", [])):
             if isinstance(message, AIMessage) and message.content.strip():
-                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip), "budget_assessment": result.get("budget_assessment"), "recommendation": result.get("recommendation")}
+                return {"response": message.content.strip(), "trip_state": result.get("search_params", trip), "budget_assessment": result.get("budget_assessment"), "recommendation": result.get("recommendation"), "travel_result": result.get("travel_result")}
         raise RuntimeError("No valid response generated")
 
     async def serve(self, prompt: str) -> str:

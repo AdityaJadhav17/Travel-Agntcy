@@ -11,6 +11,7 @@ include =
     */conversations.py
     */graph/budgets.py
     */graph/recommendations.py
+    */graph/travel_results.py
     */travel/party.py
 fail_under = 90
 show_missing = True

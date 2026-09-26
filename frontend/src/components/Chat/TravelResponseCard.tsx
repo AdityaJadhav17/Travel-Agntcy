@@ -11,6 +11,9 @@
 
 import React from "react"
 import { BudgetAssessment } from "@/types/budget"
+import { parseTravelResult, type TravelResult } from "@/types/travelResult"
+import StructuredTravelResultCard from "./StructuredTravelResultCard"
+import ReactMarkdown from "react-markdown"
 import {
   Plane,
   Hotel,
@@ -24,6 +27,7 @@ import {
 interface TravelResponseCardProps {
   content: string
   budget?: BudgetAssessment | null
+  travelResult?: TravelResult | null
 }
 
 // Detect response type based on content patterns
@@ -1154,58 +1158,24 @@ const HotelCard: React.FC<{ hotel: Record<string, string> }> = ({ hotel }) => {
   )
 }
 
-// Simple markdown for other responses
-const SimpleMarkdown: React.FC<{ content: string }> = ({ content }) => {
-  const renderLine = (line: string, idx: number) => {
-    let processed = line
-    processed = processed.replace(
-      /\*\*([^*]+)\*\*/g,
-      '<strong class="font-semibold text-white">$1</strong>',
-    )
-
-    if (processed.trim().startsWith("- ")) {
-      const bulletContent = processed.trim().substring(2)
-      return (
-        <div key={idx} className="flex items-start gap-2 text-gray-300">
-          <span className="mt-1 text-[#5feb9b]">•</span>
-          <span dangerouslySetInnerHTML={{ __html: bulletContent }} />
-        </div>
-      )
-    }
-
-    if (processed.trim() === "---") {
-      return <hr key={idx} className="my-3 border-gray-700" />
-    }
-
-    if (!processed.trim()) {
-      return <div key={idx} className="h-2" />
-    }
-
-    return (
-      <p
-        key={idx}
-        className="text-gray-300"
-        dangerouslySetInnerHTML={{ __html: processed }}
-      />
-    )
-  }
-
-  return (
-    <div className="space-y-1">
-      {content.split("\n").map((line, idx) => renderLine(line, idx))}
-    </div>
-  )
-}
+// Legacy and general replies still support Markdown without injecting provider HTML.
+const SimpleMarkdown: React.FC<{ content: string }> = ({ content }) => (
+  <div className="space-y-2 whitespace-pre-wrap text-gray-300">
+    <ReactMarkdown>{content}</ReactMarkdown>
+  </div>
+)
 
 const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
   content,
   budget,
+  travelResult,
 }) => {
   const prefix = budget ? `${budget.message}\n\n` : ""
   const body =
     prefix && content.startsWith(prefix)
       ? content.slice(prefix.length)
       : content
+  const structured = parseTravelResult(travelResult)
   return (
     <>
       {budget && (
@@ -1223,7 +1193,21 @@ const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
           <p>{budget.message}</p>
         </section>
       )}
-      <TravelResponseCard content={body} />
+      {structured ? (
+        <>
+          <StructuredTravelResultCard result={structured} />
+          <details open className="mt-4 rounded-xl border border-gray-700 p-4">
+            <summary className="cursor-pointer font-medium text-gray-200">
+              Travel notes
+            </summary>
+            <div className="mt-3 whitespace-pre-wrap text-sm text-gray-300">
+              <ReactMarkdown>{body}</ReactMarkdown>
+            </div>
+          </details>
+        </>
+      ) : (
+        <TravelResponseCard content={body} />
+      )}
     </>
   )
 }
