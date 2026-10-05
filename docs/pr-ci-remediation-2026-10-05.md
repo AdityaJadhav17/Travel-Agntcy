@@ -30,7 +30,7 @@ already on main. Updating them with the repaired base includes that fix.
 
 | PR | Update | Required treatment |
 | --- | --- | --- |
-| [#1](https://github.com/AdityaJadhav17/Travel-Agntcy/pull/1) | Python 3.14 slim images | Investigate native dependency build before accepting. `agntcy-app-sdk==0.4.6` pins `slim-bindings==0.6.3`, which has no CPython 3.14 wheel. The current slim image falls back to source compilation and fails because the C linker is absent. |
+| [#1](https://github.com/AdityaJadhav17/Travel-Agntcy/pull/1) | Python 3.14 slim images | Defer/close as incompatible with the pinned SDK. `agntcy-app-sdk==0.4.6` pins `slim-bindings==0.6.3`, which has no CPython 3.14 wheel. Adding the missing C linker reveals the underlying PyO3 0.24.2 error: Python 3.14 exceeds its supported maximum of 3.13. Keep Python 3.13 and suppress this Docker update until an SDK upgrade is validated. |
 | [#2](https://github.com/AdityaJadhav17/Travel-Agntcy/pull/2) | upload-artifact 7.0.1 | Include the shared CI fix and validate the pinned action update. |
 | [#3](https://github.com/AdityaJadhav17/Travel-Agntcy/pull/3) | checkout 7.0.1 | Include the shared CI fix and validate the pinned action update. |
 | [#6](https://github.com/AdityaJadhav17/Travel-Agntcy/pull/6) | React Flow 12.11.6 | Include the shared fix, resolve the lockfile against Tailwind 4 and verify browser journeys. |
