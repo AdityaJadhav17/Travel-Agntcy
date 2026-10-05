@@ -19,7 +19,7 @@
     "@heroicons/react": "^2.2.0",
     "@radix-ui/react-select": "^2.2.5",
     "@reactflow/node-resizer": "^2.2.14",
-    "@xyflow/react": "^12.6.4",
+    "@xyflow/react": "^12.11.6",
     "axios": "^1.13.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
