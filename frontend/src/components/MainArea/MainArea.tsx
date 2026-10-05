@@ -348,7 +348,7 @@ const MainArea: React.FC<MainAreaProps> = ({
   const onPaneClick = modalPaneClick
 
   return (
-    <div className="bg-primary-bg order-1 flex h-full w-full flex-none flex-grow flex-col items-start self-stretch p-0">
+    <div className="bg-primary-bg order-1 flex h-full w-full flex-none grow flex-col items-start self-stretch p-0">
       <ReactFlow
         nodes={nodes}
         edges={edges}

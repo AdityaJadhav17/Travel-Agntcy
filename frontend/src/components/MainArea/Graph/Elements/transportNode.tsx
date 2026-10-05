@@ -21,7 +21,7 @@ const TransportNode: React.FC<TransportNodeProps> = ({ data }) => {
   })
 
   const activeClasses = data.active
-    ? "bg-node-background-active outline outline-2 outline-accent-border shadow-[var(--shadow-default)_0px_6px_8px]"
+    ? "bg-node-background-active outline-solid outline-2 outline-accent-border shadow-[var(--shadow-default)_0px_6px_8px]"
     : "bg-node-background"
 
   const isCircular = data.compact
@@ -31,10 +31,10 @@ const TransportNode: React.FC<TransportNodeProps> = ({ data }) => {
 
   return (
     <div
-      className={` ${activeClasses} relative flex ${shapeClasses} items-center justify-center p-4 text-center text-gray-50 hover:bg-node-background-hover hover:shadow-[var(--shadow-default)_0px_6px_8px] hover:outline hover:outline-2 hover:outline-accent-border`}
+      className={` ${activeClasses} relative flex ${shapeClasses} items-center justify-center p-4 text-center text-gray-50 hover:bg-node-background-hover hover:shadow-[var(--shadow-default)_0px_6px_8px] hover:outline-2 hover:outline-accent-border hover:outline-solid`}
     >
       <div
-        className={`flex h-auto w-auto items-center justify-center whitespace-nowrap text-center font-inter font-normal tracking-normal text-node-text-primary opacity-100 ${isCircular ? (data.githubLink ? "text-xs leading-4" : "mb-2 text-xs leading-4") : "h-5 w-[94px] text-sm leading-5"}`}
+        className={`flex h-auto w-auto items-center justify-center text-center font-inter font-normal tracking-normal whitespace-nowrap text-node-text-primary opacity-100 ${isCircular ? (data.githubLink ? "text-xs leading-4" : "mb-2 text-xs leading-4") : "h-5 w-[94px] text-sm leading-5"}`}
       >
         {data.label}
       </div>
@@ -47,7 +47,7 @@ const TransportNode: React.FC<TransportNodeProps> = ({ data }) => {
           className="no-underline"
         >
           <div
-            className={`flex cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-sm transition-opacity duration-200 ease-in-out ${isCircular ? "mt-1 h-6 w-6" : "absolute -right-4 top-1/2 z-10 h-7 w-7 -translate-y-1/2"}`}
+            className={`flex cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-xs transition-opacity duration-200 ease-in-out ${isCircular ? "mt-1 h-6 w-6" : "absolute top-1/2 -right-4 z-10 h-7 w-7 -translate-y-1/2"}`}
             style={{
               backgroundColor: "var(--custom-node-background)",
               borderColor: "var(--custom-node-border)",

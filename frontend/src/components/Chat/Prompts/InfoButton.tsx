@@ -27,7 +27,7 @@ const InfoButton: React.FC<InfoButtonProps> = ({
     <div className={`relative ${className || ""}`}>
       {showInfo && (
         <div
-          className="absolute z-[1100] flex items-center gap-2 rounded p-2 shadow"
+          className="absolute z-1100 flex items-center gap-2 rounded p-2 shadow-sm"
           style={{
             backgroundColor: "var(--info-bg)",
             border: "1px solid var(--info-border)",
@@ -36,7 +36,7 @@ const InfoButton: React.FC<InfoButtonProps> = ({
           <div className="relative w-72 max-w-md">
             <button
               type="button"
-              className="absolute left-[-17.5px] top-[-17.5px] z-[1200] flex h-5 w-5 items-center justify-center rounded-full border hover:cursor-pointer"
+              className="absolute top-[-17.5px] left-[-17.5px] z-1200 flex h-5 w-5 items-center justify-center rounded-full border hover:cursor-pointer"
               style={{
                 borderColor: "var(--info-border)",
                 backgroundColor: "var(--info-bg)",
@@ -51,7 +51,7 @@ const InfoButton: React.FC<InfoButtonProps> = ({
                 e.currentTarget.style.backgroundColor = "var(--info-bg)"
               }}
             >
-              <XMarkIcon className="h-3 w-3 text-[var(--info-text)]" />
+              <XMarkIcon className="h-3 w-3 text-(--info-text)" />
             </button>
 
             <div className="text-sm" style={{ color: "var(--info-text)" }}>
@@ -63,7 +63,7 @@ const InfoButton: React.FC<InfoButtonProps> = ({
 
       <button
         type="button"
-        className="absolute z-[1000] flex items-center justify-center rounded border px-0.5 py-0.5 hover:cursor-pointer"
+        className="absolute z-1000 flex items-center justify-center rounded border px-0.5 py-0.5 hover:cursor-pointer"
         onClick={handleToggle}
         aria-label="More information"
         style={{

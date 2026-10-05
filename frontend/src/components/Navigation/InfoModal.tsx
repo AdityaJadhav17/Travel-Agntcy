@@ -60,17 +60,17 @@ const InfoModal: React.FC<InfoModalProps> = ({ isOpen, onClose }) => {
     <div className="fixed inset-0 z-50">
       <div className="absolute inset-0" onClick={onClose} />
 
-      <div className="absolute right-4 top-16 w-80 rounded-lg border border-modal-border bg-modal-background shadow-lg">
+      <div className="absolute top-16 right-4 w-80 rounded-lg border border-modal-border bg-modal-background shadow-lg">
         <button
           onClick={onClose}
-          className="absolute right-2 top-2 rounded-lg p-1 text-modal-text-secondary transition-colors hover:bg-modal-hover"
+          className="absolute top-2 right-2 rounded-lg p-1 text-modal-text-secondary transition-colors hover:bg-modal-hover"
         >
           <X className="h-4 w-4" />
         </button>
 
         <div className="space-y-4 p-4 pr-10">
           <div>
-            <h3 className="mb-3 text-sm font-normal leading-5 tracking-wide text-modal-text">
+            <h3 className="mb-3 text-sm leading-5 font-normal tracking-wide text-modal-text">
               Build and Release Information
             </h3>
             <div className="space-y-2 text-sm text-modal-text-secondary">
@@ -89,7 +89,7 @@ const InfoModal: React.FC<InfoModalProps> = ({ isOpen, onClose }) => {
           </div>
 
           <div>
-            <h3 className="mb-3 text-sm font-normal leading-5 tracking-wide text-modal-text">
+            <h3 className="mb-3 text-sm leading-5 font-normal tracking-wide text-modal-text">
               Dependencies:
             </h3>
             <div className="space-y-2 text-sm text-modal-text-secondary">

@@ -85,7 +85,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Chat History Section */}
-      <div className="scrollbar-thin scrollbar-track-transparent scrollbar-thumb-gray-700 flex-1 overflow-y-auto px-2">
+      <div className="flex-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent overflow-y-auto px-2">
         {chatHistory.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <p className="text-xs text-gray-500">No conversation history</p>
@@ -143,7 +143,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Footer - Status indicator */}
       <div className="border-t border-[#2f2f2f] p-3">
-        <div className="flex items-center gap-2 rounded-lg bg-gradient-to-r from-[#3ce98a]/10 to-transparent px-3 py-2.5">
+        <div className="flex items-center gap-2 rounded-lg bg-linear-to-r from-[#3ce98a]/10 to-transparent px-3 py-2.5">
           <div className="relative">
             <div className="h-2 w-2 rounded-full bg-[#3ce98a]" />
             <div className="absolute inset-0 h-2 w-2 animate-ping rounded-full bg-[#3ce98a] opacity-50" />

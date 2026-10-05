@@ -153,7 +153,7 @@ const TravelPromptsDropdown: React.FC<TravelPromptsDropdownProps> = ({
     (category) => category.prompts.length === 0,
   )
 
-  const menuClasses = `absolute bottom-full left-0 z-[1000] mb-2 max-h-[400px] min-h-[50px] w-[380px] overflow-y-auto rounded-xl border border-gray-700 bg-[#2f2f2f] px-2 py-2 shadow-xl ${
+  const menuClasses = `absolute bottom-full left-0 z-1000 mb-2 max-h-[400px] min-h-[50px] w-[380px] overflow-y-auto rounded-xl border border-gray-700 bg-[#2f2f2f] px-2 py-2 shadow-xl ${
     isOpen ? "block animate-fadeInDropdown" : "hidden"
   }`
 
@@ -200,7 +200,7 @@ const TravelPromptsDropdown: React.FC<TravelPromptsDropdownProps> = ({
                     }}
                   >
                     <span className="text-sm">🔍</span>
-                    <span className="font-inter text-xs font-semibold uppercase tracking-wider text-[#5feb9b]">
+                    <span className="font-inter text-xs font-semibold tracking-wider text-[#5feb9b] uppercase">
                       Search Trips
                     </span>
                   </div>
@@ -214,7 +214,7 @@ const TravelPromptsDropdown: React.FC<TravelPromptsDropdownProps> = ({
                     }}
                   >
                     <span className="text-sm">⚡</span>
-                    <span className="font-inter text-xs font-semibold uppercase tracking-wider text-[#7becac]">
+                    <span className="font-inter text-xs font-semibold tracking-wider text-[#7becac] uppercase">
                       Streaming Search
                     </span>
                   </div>
@@ -225,11 +225,11 @@ const TravelPromptsDropdown: React.FC<TravelPromptsDropdownProps> = ({
                     className="group mx-1 my-1 flex cursor-pointer flex-col rounded-lg border border-transparent px-3 py-3 transition-all duration-200 hover:bg-[#3a3a3a]"
                     onClick={() => handleItemClick(item.prompt)}
                   >
-                    <div className="w-full break-words font-inter text-sm font-normal leading-5 text-gray-300 group-hover:text-white">
+                    <div className="w-full font-inter text-sm leading-5 font-normal wrap-break-word text-gray-300 group-hover:text-white">
                       {item.prompt}
                     </div>
                     {item.description && (
-                      <div className="mt-1 w-full break-words font-inter text-xs font-normal leading-4 text-gray-500">
+                      <div className="mt-1 w-full font-inter text-xs leading-4 font-normal wrap-break-word text-gray-500">
                         {item.description}
                       </div>
                     )}

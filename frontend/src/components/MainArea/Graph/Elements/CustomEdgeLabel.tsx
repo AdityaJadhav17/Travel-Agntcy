@@ -31,11 +31,11 @@ const CustomEdgeLabel: React.FC<CustomEdgeLabelProps> = ({
       <div
         className={cn(
           "pointer-events-none absolute -translate-x-1/2 -translate-y-1/2",
-          "h-5 rounded-lg px-[5px] py-[2px] font-inter text-xs font-normal leading-4",
+          "h-5 rounded-lg px-[5px] py-[2px] font-inter text-xs leading-4 font-normal",
           "flex items-center justify-center border-none opacity-100 shadow-none",
 
           isLongLabel
-            ? "w-auto min-w-[80px] max-w-[120px] gap-[6px]"
+            ? "w-auto max-w-[120px] min-w-[80px] gap-[6px]"
             : "w-[34px] gap-1",
           active
             ? "bg-edge-label-background-active text-edge-label-text-active"
@@ -51,8 +51,8 @@ const CustomEdgeLabel: React.FC<CustomEdgeLabelProps> = ({
         {label && (
           <div
             className={cn(
-              "flex flex-shrink-0 items-center justify-center whitespace-nowrap",
-              "font-inter text-xs font-normal leading-4",
+              "flex shrink-0 items-center justify-center whitespace-nowrap",
+              "font-inter text-xs leading-4 font-normal",
             )}
           >
             {label}
