@@ -77,7 +77,7 @@ const IdentityModal: React.FC<IdentityModalProps> = ({
         >
           <button
             onClick={onClose}
-            className="absolute right-3 top-3 z-10 text-xl leading-none text-node-text-secondary transition-colors hover:text-node-text-primary"
+            className="absolute top-3 right-3 z-10 text-xl leading-none text-node-text-secondary transition-colors hover:text-node-text-primary"
           >
             ×
           </button>
@@ -90,13 +90,13 @@ const IdentityModal: React.FC<IdentityModalProps> = ({
             {nodeData?.hasBadgeDetails && (
               <button
                 onClick={onShowBadgeDetails}
-                className={`flex h-11 w-full items-center justify-between gap-3 rounded-sm px-3 transition-colors hover:bg-gray-500 hover:bg-opacity-20 ${
+                className={`hover:bg-opacity-20 flex h-11 w-full items-center justify-between gap-3 rounded-sm px-3 transition-colors hover:bg-gray-500 ${
                   activeModal === "badge"
-                    ? "border border-accent-border bg-accent-border bg-opacity-20"
+                    ? "bg-opacity-20 border border-accent-border bg-accent-border"
                     : ""
                 }`}
               >
-                <span className="text-left font-inter text-sm font-normal leading-5 text-node-text-primary">
+                <span className="text-left font-inter text-sm leading-5 font-normal text-node-text-primary">
                   Badge details
                 </span>
                 <Eye className="h-4 w-4 text-node-text-secondary" />
@@ -106,13 +106,13 @@ const IdentityModal: React.FC<IdentityModalProps> = ({
             {nodeData?.hasPolicyDetails && (
               <button
                 onClick={onShowPolicyDetails}
-                className={`flex h-11 w-full items-center justify-between gap-3 rounded-sm px-3 transition-colors hover:bg-gray-500 hover:bg-opacity-20 ${
+                className={`hover:bg-opacity-20 flex h-11 w-full items-center justify-between gap-3 rounded-sm px-3 transition-colors hover:bg-gray-500 ${
                   activeModal === "policy"
-                    ? "border border-accent-border bg-accent-border bg-opacity-20"
+                    ? "bg-opacity-20 border border-accent-border bg-accent-border"
                     : ""
                 }`}
               >
-                <span className="text-left font-inter text-sm font-normal leading-5 text-node-text-primary">
+                <span className="text-left font-inter text-sm leading-5 font-normal text-node-text-primary">
                   Policy details
                 </span>
                 <Eye className="h-4 w-4 text-node-text-secondary" />
@@ -128,9 +128,9 @@ const IdentityModal: React.FC<IdentityModalProps> = ({
                     "noopener,noreferrer",
                   )
                 }
-                className="flex h-11 w-full items-center justify-between gap-3 rounded-sm px-3 transition-colors hover:bg-gray-500 hover:bg-opacity-20"
+                className="hover:bg-opacity-20 flex h-11 w-full items-center justify-between gap-3 rounded-sm px-3 transition-colors hover:bg-gray-500"
               >
-                <span className="text-left font-inter text-sm font-normal leading-5 text-node-text-primary">
+                <span className="text-left font-inter text-sm leading-5 font-normal text-node-text-primary">
                   Source code
                 </span>
                 <img src={githubIconSrc} alt="GitHub" className="h-4 w-4" />

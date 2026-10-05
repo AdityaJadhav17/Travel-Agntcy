@@ -55,15 +55,15 @@ const AuctionStreamingFeed: React.FC<AuctionStreamingFeedProps> = ({
 
       <div className="flex max-w-[calc(100%-3rem)] flex-1 flex-col items-start rounded p-1 px-2">
         {errorMessage ? (
-          <div className="whitespace-pre-wrap break-words font-cisco text-sm font-normal leading-5 text-chat-text">
+          <div className="font-cisco text-sm leading-5 font-normal wrap-break-word whitespace-pre-wrap text-chat-text">
             Connection error: {errorMessage}
           </div>
         ) : isComplete ? (
-          <div className="whitespace-pre-wrap break-words font-cisco text-sm font-bold leading-5 text-chat-text">
+          <div className="font-cisco text-sm leading-5 font-bold wrap-break-word whitespace-pre-wrap text-chat-text">
             Streaming output:
           </div>
         ) : prompt && !apiError ? (
-          <div className="whitespace-pre-wrap break-words font-cisco text-sm font-bold leading-5 text-chat-text">
+          <div className="font-cisco text-sm leading-5 font-bold wrap-break-word whitespace-pre-wrap text-chat-text">
             Streaming<span className="loading-dots ml-1"></span>
           </div>
         ) : null}

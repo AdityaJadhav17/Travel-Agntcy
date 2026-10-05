@@ -176,7 +176,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             <textarea
               aria-label="Message Travel AGNTCY"
               ref={textareaRef}
-              className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 py-3.5 pr-14 text-[15px] leading-6 text-gray-100 outline-none placeholder:text-gray-500"
+              className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 py-3.5 pr-14 text-[15px] leading-6 text-gray-100 outline-hidden placeholder:text-gray-500"
               placeholder="Message Travel AGNTCY..."
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -186,7 +186,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             />
 
             {/* Send button */}
-            <div className="absolute bottom-2.5 right-3">
+            <div className="absolute right-3 bottom-2.5">
               <button
                 aria-label="Send message"
                 onClick={() => {

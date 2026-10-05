@@ -18,7 +18,7 @@ const UserMessage: React.FC<UserMessageProps> = ({ content }) => {
       </div>
 
       <div className="flex flex-1 flex-col items-start justify-center rounded p-1">
-        <div className="whitespace-pre-wrap break-words font-inter text-sm font-normal leading-6 text-gray-100">
+        <div className="font-inter text-sm leading-6 font-normal wrap-break-word whitespace-pre-wrap text-gray-100">
           {content}
         </div>
       </div>

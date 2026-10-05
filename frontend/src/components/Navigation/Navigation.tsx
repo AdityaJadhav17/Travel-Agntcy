@@ -34,9 +34,9 @@ const Navigation: React.FC<NavigationProps> = ({
   }
 
   return (
-    <div className="order-0 box-border flex h-[56px] w-full flex-none flex-grow-0 flex-col items-start self-stretch p-0">
+    <div className="order-0 box-border flex h-[56px] w-full flex-none grow-0 flex-col items-start self-stretch p-0">
       <div
-        className="order-0 box-border flex h-[56px] w-full flex-none flex-grow-0 flex-row items-center justify-between gap-2 self-stretch border-b border-emerald-400/30 px-2 py-[10px] shadow-lg sm:px-4"
+        className="order-0 box-border flex h-[56px] w-full flex-none grow-0 flex-row items-center justify-between gap-2 self-stretch border-b border-emerald-400/30 px-2 py-[10px] shadow-lg sm:px-4"
         style={{
           backgroundImage:
             "linear-gradient(to right, #3ce98a, #5feb9b, #7becac, #94edbb, #abedc9)",
@@ -59,7 +59,7 @@ const Navigation: React.FC<NavigationProps> = ({
 
         {/* Center - Logo and Brand */}
         <div className="flex items-center gap-3">
-          <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-white/30 shadow-sm">
+          <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-white/30 shadow-xs">
             <Plane className="h-5 w-5 text-gray-800" strokeWidth={2} />
           </div>
           <span className="text-lg font-semibold tracking-tight text-gray-800">

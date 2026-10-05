@@ -509,7 +509,7 @@ const App: React.FC = () => {
                         /* Assistant Message - left aligned with avatar */
                         <div className="flex items-start gap-4">
                           <div
-                            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full"
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
                             style={{
                               background:
                                 "linear-gradient(135deg, #3ce98a, #5feb9b)",
@@ -545,7 +545,7 @@ const App: React.FC = () => {
                                       "Compare nearby arrival airports",
                                     )
                                   }
-                                  className="ml-2 mt-3 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
+                                  className="mt-3 ml-2 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
                                 >
                                   Compare nearby arrival airports
                                 </button>
@@ -558,7 +558,7 @@ const App: React.FC = () => {
                                   onClick={() =>
                                     handleUserInput("Compare cheaper dates")
                                   }
-                                  className="ml-2 mt-3 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
+                                  className="mt-3 ml-2 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
                                 >
                                   Compare cheaper dates
                                 </button>
@@ -570,7 +570,7 @@ const App: React.FC = () => {
                                   onClick={() =>
                                     handleUserInput("Why this flight?")
                                   }
-                                  className="ml-2 mt-3 rounded-lg border border-emerald-400 px-3 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-400/10"
+                                  className="mt-3 ml-2 rounded-lg border border-emerald-400 px-3 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-400/10"
                                 >
                                   Why this flight?
                                 </button>
@@ -585,7 +585,7 @@ const App: React.FC = () => {
                   {isAgentLoading && (
                     <div className="mb-6 flex items-start gap-4">
                       <div
-                        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
                         style={{
                           background:
                             "linear-gradient(135deg, #3ce98a, #5feb9b)",
@@ -601,7 +601,7 @@ const App: React.FC = () => {
                           <StructuredTravelResultCard result={partialResult} />
                         )}
                         {streamText && (
-                          <p className="whitespace-pre-wrap text-sm text-gray-300">
+                          <p className="text-sm whitespace-pre-wrap text-gray-300">
                             {streamText}
                           </p>
                         )}
@@ -622,7 +622,7 @@ const App: React.FC = () => {
             </div>
 
             {/* Input area - fixed at bottom */}
-            <div className="flex w-full flex-none flex-col items-center justify-end gap-0 bg-[#212121] px-4 pb-6 pt-2">
+            <div className="flex w-full flex-none flex-col items-center justify-end gap-0 bg-[#212121] px-4 pt-2 pb-6">
               <ChatArea
                 setMessages={setMessages}
                 setButtonClicked={setButtonClicked}

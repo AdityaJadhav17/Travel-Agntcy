@@ -1,10 +1,177 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-.theme-switching * {
-  transition: none !important;
-  animation-duration: 0s !important;
+@plugin "tailwindcss-animate";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-app-background: var(--app-background);
+  --color-node-background: var(--node-background);
+  --color-node-data-background: var(--node-data-background);
+  --color-node-background-hover: var(--node-background-hover);
+  --color-node-background-active: var(--node-background-active);
+  --color-node-text-primary: var(--node-text-primary);
+  --color-node-text-secondary: var(--node-text-secondary);
+  --color-node-icon-background: var(--node-icon-background);
+  --color-edge-label-background: var(--edge-label-background);
+  --color-edge-label-background-active: var(--edge-label-background-active);
+  --color-edge-label-text: var(--edge-label-text);
+  --color-edge-label-text-active: var(--edge-label-text-active);
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-border: var(--accent-border);
+  --color-nav-background: var(--nav-background);
+  --color-nav-background-secondary: var(--nav-background-secondary);
+  --color-nav-border: var(--nav-border);
+  --color-nav-text: var(--nav-text);
+  --color-chat-background: var(--chat-background);
+  --color-chat-background-hover: var(--chat-background-hover);
+  --color-chat-text: var(--chat-text);
+  --color-chat-input-background: var(--chat-input-background);
+  --color-chat-input-border: var(--chat-input-border);
+  --color-chat-dropdown-background: var(--chat-dropdown-background);
+  --color-chat-dropdown-icon: var(--chat-dropdown-icon);
+  --color-action-background: var(--action-background);
+  --color-action-background-hover: var(--action-background-hover);
+  --color-sidebar-background: var(--sidebar-background);
+  --color-sidebar-item-selected: var(--sidebar-item-selected);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-text: var(--sidebar-text);
+  --color-shadow-default: var(--shadow-default);
+  --color-overlay-background: var(--overlay-background);
+  --color-control-border-weak: var(--control-border-weak);
+  --color-modal-background: var(--modal-background);
+  --color-modal-border: var(--modal-border);
+  --color-modal-text: var(--modal-text);
+  --color-modal-text-secondary: var(--modal-text-secondary);
+  --color-modal-accent: var(--modal-accent);
+  --color-modal-hover: var(--modal-hover);
+  --color-modal-button: var(--modal-button);
+  --color-modal-button-text: var(--modal-button-text);
+  --color-modal-button-hover: var(--modal-button-hover);
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-chart-1: hsl(var(--chart-1));
+  --color-chart-2: hsl(var(--chart-2));
+  --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4));
+  --color-chart-5: hsl(var(--chart-5));
+
+  --border-color-sidebar-border: var(--sidebar-border);
+  --border-color-nav-border: var(--nav-border);
+  --border-color-modal-border: var(--modal-border);
+  --border-color-accent-border: var(--accent-border);
+
+  --spacing-122: 122px;
+  --spacing-160: 160px;
+  --spacing-162: 162px;
+  --spacing-166: 166px;
+  --spacing-194: 194px;
+  --spacing-269: 269px;
+
+  --width-122: 122px;
+  --width-160: 160px;
+  --width-162: 162px;
+  --width-166: 166px;
+  --width-194: 194px;
+  --width-269: 269px;
+
+  --height-96: 96px;
+
+  --font-cisco: CiscoSans, Inter;
+  --font-inter: Inter;
+
+  --animate-fadeInDropdown: fadeInDropdown 0.3s ease-out;
+  --animate-scaleIn: scaleIn 0.25s ease-in-out;
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  @keyframes fadeInDropdown {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes scaleIn {
+    from {
+      transform: scale(0.3);
+    }
+    to {
+      transform: scale(1);
+    }
+  }
+}
+
+/*
+  The default border color has changed to `currentcolor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentcolor);
+  }
+}
+
+@utility app-container {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--app-background);
+}
+
+@utility main-content {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--app-background);
+}
+
+@layer utilities {
+  .theme-switching * {
+    transition: none !important;
+    animation-duration: 0s !important;
+  }
 }
 
 @layer base {
@@ -301,24 +468,6 @@
     --chart-3: 30 80% 55%;
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
-  }
-}
-
-@layer components {
-  .app-container {
-    display: flex;
-    height: 100vh;
-    width: 100vw;
-    flex-direction: column;
-    overflow: hidden;
-    background-color: var(--app-background);
-  }
-
-  .main-content {
-    flex-grow: 1;
-    display: flex;
-    flex-direction: column;
-    background-color: var(--app-background);
   }
 }
 

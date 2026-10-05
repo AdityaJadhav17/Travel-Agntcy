@@ -68,16 +68,16 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data }) => {
   }
 
   const activeClasses = data.active
-    ? "bg-node-background-active outline outline-2 outline-accent-border shadow-[var(--shadow-default)_0px_6px_8px]"
+    ? "bg-node-background-active outline-solid outline-2 outline-accent-border shadow-[var(--shadow-default)_0px_6px_8px]"
     : "bg-node-background"
 
   return (
     <>
       <div
         ref={nodeRef}
-        className={`order-0 relative flex h-[91px] w-[193px] flex-none grow-0 flex-col items-start justify-start gap-2 rounded-lg p-4 ${activeClasses} hover:bg-node-background-hover hover:shadow-[var(--shadow-default)_0px_6px_8px] hover:outline hover:outline-2 hover:outline-accent-border`}
+        className={`relative order-0 flex h-[91px] w-[193px] flex-none grow-0 flex-col items-start justify-start gap-2 rounded-lg p-4 ${activeClasses} hover:bg-node-background-hover hover:shadow-[var(--shadow-default)_0px_6px_8px] hover:outline-2 hover:outline-accent-border hover:outline-solid`}
       >
-        <div className="flex h-5 w-5 flex-shrink-0 items-center justify-center gap-2.5 rounded bg-node-icon-background py-1 opacity-100">
+        <div className="flex h-5 w-5 shrink-0 items-center justify-center gap-2.5 rounded bg-node-icon-background py-1 opacity-100">
           <div className="flex h-4 w-4 items-center justify-center opacity-100">
             {data.icon}
           </div>
@@ -89,7 +89,7 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data }) => {
             width: data.verificationStatus === "verified" ? "160px" : "162px",
           }}
         >
-          <span className="order-0 flex h-5 flex-none grow-0 items-center overflow-hidden text-ellipsis whitespace-nowrap font-inter text-sm font-normal leading-5 tracking-normal text-node-text-primary opacity-100">
+          <span className="order-0 flex h-5 flex-none grow-0 items-center overflow-hidden font-inter text-sm leading-5 font-normal tracking-normal text-ellipsis whitespace-nowrap text-node-text-primary opacity-100">
             {data.label1}
           </span>
           {data.verificationStatus === "verified" && (
@@ -102,7 +102,7 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data }) => {
         </div>
 
         <div
-          className="order-1 h-4 flex-none flex-grow-0 self-stretch overflow-hidden text-ellipsis whitespace-nowrap font-inter text-xs font-light leading-4 text-node-text-secondary"
+          className="order-1 h-4 flex-none grow-0 self-stretch overflow-hidden font-inter text-xs leading-4 font-light text-ellipsis whitespace-nowrap text-node-text-secondary"
           style={{
             width: "162px",
           }}
@@ -110,7 +110,7 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data }) => {
           {data.label2}
         </div>
 
-        <div className="absolute -right-4 top-1/2 z-10 flex -translate-y-1/2 flex-col gap-1">
+        <div className="absolute top-1/2 -right-4 z-10 flex -translate-y-1/2 flex-col gap-1">
           {data.githubLink && (
             <a
               href={data.githubLink}
@@ -119,7 +119,7 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data }) => {
               className="no-underline"
             >
               <div
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-sm transition-opacity duration-200 ease-in-out"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-xs transition-opacity duration-200 ease-in-out"
                 style={{
                   backgroundColor: "var(--custom-node-background)",
                   borderColor: "var(--custom-node-border)",
@@ -143,7 +143,7 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data }) => {
               className="no-underline"
             >
               <div
-                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-sm"
+                className="flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-xs"
                 style={{
                   backgroundColor: "var(--custom-node-background)",
                   borderColor: "var(--custom-node-border)",
@@ -165,9 +165,9 @@ const CustomNode: React.FC<CustomNodeProps> = ({ data }) => {
           )}
           {data.verificationStatus === "verified" && (
             <div
-              className={`flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-sm transition-opacity ${
+              className={`flex h-7 w-7 cursor-pointer items-center justify-center rounded-lg border border-solid p-1 opacity-100 shadow-xs transition-opacity ${
                 data.isModalOpen === true
-                  ? "border-accent-border bg-accent-border bg-opacity-30"
+                  ? "bg-opacity-30 border-accent-border bg-accent-border"
                   : ""
               }`}
               style={{

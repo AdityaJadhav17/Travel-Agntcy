@@ -20,18 +20,18 @@ const SidebarSection: React.FC<SidebarSectionProps> = ({
   children,
 }) => {
   return (
-    <div className="h-18 order-0 flex w-72 flex-none grow-0 flex-col items-start self-stretch p-0">
+    <div className="order-0 flex h-18 w-72 flex-none grow-0 flex-col items-start self-stretch p-0">
       <div
-        className="order-0 flex h-9 w-[288px] flex-none flex-grow-0 cursor-pointer flex-row items-start gap-2 self-stretch bg-sidebar-background px-0 py-2 font-inter"
+        className="order-0 flex h-9 w-[288px] flex-none grow-0 cursor-pointer flex-row items-start gap-2 self-stretch bg-sidebar-background px-0 py-2 font-inter"
         onClick={onToggle}
       >
-        <div className="order-0 hidden h-5 w-5 flex-none flex-grow-0" />
+        <div className="order-0 hidden h-5 w-5 flex-none grow-0" />
 
-        <span className="order-1 h-5 w-[288px] flex-none flex-grow font-inter text-sm font-normal leading-5 tracking-normal text-white">
+        <span className="order-1 h-5 w-[288px] flex-none grow font-inter text-sm leading-5 font-normal tracking-normal text-white">
           {title}
         </span>
         <ChevronUp
-          className={`order-2 hidden h-5 w-5 flex-none flex-grow-0 text-white transition-transform ${
+          className={`order-2 hidden h-5 w-5 flex-none grow-0 text-white transition-transform ${
             isExpanded ? "rotate-0" : "rotate-180"
           }`}
         />

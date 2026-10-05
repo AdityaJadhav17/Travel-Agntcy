@@ -205,15 +205,15 @@ const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = ({
 
       <div className="flex max-w-[calc(100%-3rem)] flex-1 flex-col items-start rounded p-1 px-2">
         {errorMessage ? (
-          <div className="whitespace-pre-wrap break-words font-cisco text-sm font-normal leading-5 text-chat-text">
+          <div className="font-cisco text-sm leading-5 font-normal wrap-break-word whitespace-pre-wrap text-chat-text">
             Connection error: {errorMessage}
           </div>
         ) : storeIsComplete && groupCurrentOrderId ? (
-          <div className="whitespace-pre-wrap break-words font-cisco text-sm font-normal leading-5 text-chat-text">
+          <div className="font-cisco text-sm leading-5 font-normal wrap-break-word whitespace-pre-wrap text-chat-text">
             Order {groupCurrentOrderId}
           </div>
         ) : prompt && !apiError ? (
-          <div className="whitespace-pre-wrap break-words font-cisco text-sm font-normal leading-5 text-chat-text">
+          <div className="font-cisco text-sm leading-5 font-normal wrap-break-word whitespace-pre-wrap text-chat-text">
             Processing Request...
           </div>
         ) : null}
@@ -221,7 +221,7 @@ const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = ({
         {prompt && !storeIsComplete && !apiError && events.length === 0 && (
           <div className="mt-3 flex w-full flex-row items-start gap-1">
             <div className="mt-1 flex items-center">
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-b-transparent border-l-transparent border-r-accent-primary border-t-accent-primary" />
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-t-accent-primary border-r-accent-primary border-b-transparent border-l-transparent" />
             </div>
             <div className="flex-1"></div>
           </div>
@@ -237,7 +237,7 @@ const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = ({
             </div>
 
             <div className="flex-1">
-              <span className="font-cisco text-sm font-normal leading-[18px] text-chat-text">
+              <span className="font-cisco text-sm leading-[18px] font-normal text-chat-text">
                 View Details
               </span>
             </div>
@@ -280,7 +280,7 @@ const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = ({
               {events.length > 0 && !storeIsComplete && (
                 <div className="flex w-full flex-row items-start gap-1">
                   <div className="mt-1 flex items-center">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-b-transparent border-l-transparent border-r-accent-primary border-t-accent-primary" />
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-t-accent-primary border-r-accent-primary border-b-transparent border-l-transparent" />
                   </div>
                   <div className="flex-1"></div>
                 </div>

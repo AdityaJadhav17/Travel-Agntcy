@@ -50,10 +50,10 @@ const Message: React.FC<MessageProps> = ({
     <div
       className={`flex w-full items-start gap-2 px-4 py-6 sm:px-8 md:px-16 md:py-[30px] lg:px-[120px] ${aiMessage ? "bg-[rgb(247,247,248)]" : ""}`}
     >
-      <div className="flex h-[35px] w-[35px] flex-shrink-0 items-center justify-center">
+      <div className="flex h-[35px] w-[35px] shrink-0 items-center justify-center">
         {aiMessage ? <RiRobot2Fill color="#049FD9" /> : <HiUser />}
       </div>
-      <div className="ml-2 min-w-0 flex-1 break-words">
+      <div className="ml-2 min-w-0 flex-1 wrap-break-word">
         {loading ? (
           <div style={{ opacity: 0.5 }}>
             <Waveform size="20" stroke="3.5" speed="1" color="#049FD9" />

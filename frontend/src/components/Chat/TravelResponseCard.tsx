@@ -558,7 +558,7 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
       )}
       {/* Success Header */}
       {sections.intro && (
-        <div className="flex items-center gap-3 rounded-xl border border-[#3ce98a]/30 bg-gradient-to-r from-[#3ce98a]/20 to-[#5feb9b]/10 p-4">
+        <div className="flex items-center gap-3 rounded-xl border border-[#3ce98a]/30 bg-linear-to-r from-[#3ce98a]/20 to-[#5feb9b]/10 p-4">
           <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#3ce98a]">
             <span className="text-xl">🎉</span>
           </div>
@@ -630,7 +630,7 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
       {/* Activities Card */}
       {sections.activities && sections.activities.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-          <div className="flex items-center gap-2 border-b border-gray-700 bg-gradient-to-r from-orange-500/20 to-transparent px-4 py-3">
+          <div className="flex items-center gap-2 border-b border-gray-700 bg-linear-to-r from-orange-500/20 to-transparent px-4 py-3">
             <span className="text-lg">🎯</span>
             <h3 className="font-semibold text-white">Things to Do</h3>
           </div>
@@ -667,7 +667,7 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
       {/* Trip Summary */}
       {sections.tripSummary && sections.tripSummary.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-          <div className="flex items-center gap-2 border-b border-gray-700 bg-gradient-to-r from-[#3ce98a]/20 to-transparent px-4 py-3">
+          <div className="flex items-center gap-2 border-b border-gray-700 bg-linear-to-r from-[#3ce98a]/20 to-transparent px-4 py-3">
             <span className="text-lg">📋</span>
             <h3 className="font-semibold text-white">Trip Summary</h3>
           </div>
@@ -717,7 +717,7 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3 rounded-xl border border-blue-500/30 bg-gradient-to-r from-blue-500/20 to-blue-600/10 p-4">
+      <div className="flex items-center gap-3 rounded-xl border border-blue-500/30 bg-linear-to-r from-blue-500/20 to-blue-600/10 p-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500">
           <Plane className="h-5 w-5 text-white" />
         </div>
@@ -751,7 +751,7 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
             {/* Outbound Flight Card */}
             {option.outbound && Object.keys(option.outbound).length > 0 && (
               <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-                <div className="flex items-center justify-between border-b border-gray-700 bg-gradient-to-r from-blue-500/20 to-transparent px-4 py-3">
+                <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-blue-500/20 to-transparent px-4 py-3">
                   <div className="flex items-center gap-2">
                     <span className="text-lg">🛫</span>
                     <h3 className="font-semibold text-white">
@@ -788,7 +788,7 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
                       <div className="space-y-1">
                         <div className="flex items-center gap-1.5 text-gray-500">
                           <Calendar className="h-3.5 w-3.5" />
-                          <span className="text-xs uppercase tracking-wide">
+                          <span className="text-xs tracking-wide uppercase">
                             Departure
                           </span>
                         </div>
@@ -801,7 +801,7 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
                       <div className="space-y-1">
                         <div className="flex items-center gap-1.5 text-gray-500">
                           <Clock className="h-3.5 w-3.5" />
-                          <span className="text-xs uppercase tracking-wide">
+                          <span className="text-xs tracking-wide uppercase">
                             Arrival
                           </span>
                         </div>
@@ -825,7 +825,7 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
               option.returnFlight &&
               Object.keys(option.returnFlight).length > 0 && (
                 <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-                  <div className="flex items-center justify-between border-b border-gray-700 bg-gradient-to-r from-purple-500/20 to-transparent px-4 py-3">
+                  <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-purple-500/20 to-transparent px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span className="text-lg">🛬</span>
                       <h3 className="font-semibold text-white">
@@ -859,7 +859,7 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5 text-gray-500">
                             <Calendar className="h-3.5 w-3.5" />
-                            <span className="text-xs uppercase tracking-wide">
+                            <span className="text-xs tracking-wide uppercase">
                               Departure
                             </span>
                           </div>
@@ -872,7 +872,7 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5 text-gray-500">
                             <Clock className="h-3.5 w-3.5" />
-                            <span className="text-xs uppercase tracking-wide">
+                            <span className="text-xs tracking-wide uppercase">
                               Arrival
                             </span>
                           </div>
@@ -904,7 +904,7 @@ const HotelsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3 rounded-xl border border-purple-500/30 bg-gradient-to-r from-purple-500/20 to-purple-600/10 p-4">
+      <div className="flex items-center gap-3 rounded-xl border border-purple-500/30 bg-linear-to-r from-purple-500/20 to-purple-600/10 p-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-500">
           <Hotel className="h-5 w-5 text-white" />
         </div>
@@ -986,7 +986,7 @@ const ActivitiesOnlyCard: React.FC<{ content: string }> = ({ content }) => {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-gradient-to-r from-orange-500/20 to-orange-600/10 p-4">
+      <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-linear-to-r from-orange-500/20 to-orange-600/10 p-4">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500">
           <Activity className="h-5 w-5 text-white" />
         </div>
@@ -1008,7 +1008,7 @@ const ActivitiesOnlyCard: React.FC<{ content: string }> = ({ content }) => {
             className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]"
           >
             <div className="flex items-start gap-3 p-4">
-              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-orange-500/20 text-sm font-bold text-orange-400">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-500/20 text-sm font-bold text-orange-400">
                 {activity.rank}
               </span>
               <div className="min-w-0 flex-1">
@@ -1050,7 +1050,7 @@ const FlightCard: React.FC<{
 }> = ({ title, icon, flight }) => {
   return (
     <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-      <div className="flex items-center justify-between border-b border-gray-700 bg-gradient-to-r from-blue-500/20 to-transparent px-4 py-3">
+      <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-blue-500/20 to-transparent px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-lg">{icon}</span>
           <h3 className="font-semibold text-white">{title}</h3>
@@ -1085,7 +1085,7 @@ const FlightCard: React.FC<{
             <div className="space-y-1">
               <div className="flex items-center gap-1.5 text-gray-500">
                 <Calendar className="h-3.5 w-3.5" />
-                <span className="text-xs uppercase tracking-wide">
+                <span className="text-xs tracking-wide uppercase">
                   Departure
                 </span>
               </div>
@@ -1098,7 +1098,7 @@ const FlightCard: React.FC<{
             <div className="space-y-1">
               <div className="flex items-center gap-1.5 text-gray-500">
                 <Clock className="h-3.5 w-3.5" />
-                <span className="text-xs uppercase tracking-wide">Arrival</span>
+                <span className="text-xs tracking-wide uppercase">Arrival</span>
               </div>
               <p className="font-medium text-white">
                 {formatDateTime(flight.arrival)}
@@ -1115,7 +1115,7 @@ const FlightCard: React.FC<{
 const HotelCard: React.FC<{ hotel: Record<string, string> }> = ({ hotel }) => {
   return (
     <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-      <div className="flex items-center justify-between border-b border-gray-700 bg-gradient-to-r from-purple-500/20 to-transparent px-4 py-3">
+      <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-purple-500/20 to-transparent px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="text-lg">🏨</span>
           <h3 className="font-semibold text-white">Hotel</h3>
@@ -1200,7 +1200,7 @@ const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
             <summary className="cursor-pointer font-medium text-gray-200">
               Travel notes
             </summary>
-            <div className="mt-3 whitespace-pre-wrap text-sm text-gray-300">
+            <div className="mt-3 text-sm whitespace-pre-wrap text-gray-300">
               <ReactMarkdown>{body}</ReactMarkdown>
             </div>
           </details>

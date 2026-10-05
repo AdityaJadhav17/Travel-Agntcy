@@ -45,7 +45,7 @@ const BranchingEdge: React.FC<BranchingEdgeProps> = ({
 
     return (
       <>
-        <svg className="absolute left-0 top-0">
+        <svg className="absolute top-0 left-0">
           <defs>
             <marker
               id={`${id}-arrow-start`}
@@ -143,7 +143,7 @@ const BranchingEdge: React.FC<BranchingEdgeProps> = ({
 
   return (
     <>
-      <svg className="absolute left-0 top-0">
+      <svg className="absolute top-0 left-0">
         <defs>
           <marker
             id={`${id}-arrow-start`}

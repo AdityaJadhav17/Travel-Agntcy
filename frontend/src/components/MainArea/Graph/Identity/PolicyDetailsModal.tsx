@@ -82,7 +82,7 @@ const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
         >
           <button
             onClick={onClose}
-            className="absolute right-3 top-3 z-10 text-xl leading-none text-node-text-secondary transition-colors hover:text-node-text-primary"
+            className="absolute top-3 right-3 z-10 text-xl leading-none text-node-text-secondary transition-colors hover:text-node-text-primary"
           >
             ×
           </button>
@@ -101,7 +101,7 @@ const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
               </div>
               <button
                 onClick={fetchPolicyDetailsData}
-                className="rounded bg-node-icon-background px-4 py-2 text-sm text-node-text-primary hover:bg-opacity-80"
+                className="hover:bg-opacity-80 rounded bg-node-icon-background px-4 py-2 text-sm text-node-text-primary"
               >
                 Retry
               </button>
@@ -111,11 +111,11 @@ const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
               <h3 className="mb-3 text-lg font-semibold text-node-text-primary">
                 {nodeName} Policy Details
               </h3>
-              <pre className="overflow-auto whitespace-pre-wrap rounded border border-gray-600 p-3 font-mono text-xs text-node-text-primary">
+              <pre className="overflow-auto rounded border border-gray-600 p-3 font-mono text-xs whitespace-pre-wrap text-node-text-primary">
                 {JSON.stringify(policyData, null, 2)}
               </pre>
               {loading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-node-background bg-opacity-80 backdrop-blur-sm">
+                <div className="bg-opacity-80 absolute inset-0 flex items-center justify-center bg-node-background backdrop-blur-xs">
                   <Spinner />
                 </div>
               )}
