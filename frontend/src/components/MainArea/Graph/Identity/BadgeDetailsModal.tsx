@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useState, useEffect, useCallback } from "react"
-import { BadgeData } from "./types"
+import React from "react"
 import { CustomNodeData } from "../Elements/types"
-import { fetchBadgeDetails, IdentityServiceError } from "./IdentityApi"
+import { fetchBadgeDetails } from "./IdentityApi"
 import { useEscapeKey } from "@/hooks/useEscapeKey"
+import { useIdentityDetails } from "@/hooks/useIdentityDetails"
 import { createPortal } from "react-dom"
 
 const Spinner: React.FC = () => (
@@ -23,7 +23,7 @@ interface BadgeDetailsModalProps {
   isMcpServer?: boolean
 }
 
-const BadgeDetailsModal: React.FC<BadgeDetailsModalProps> = ({
+const BadgeDetailsContent: React.FC<BadgeDetailsModalProps> = ({
   isOpen,
   onClose,
   nodeName,
@@ -31,35 +31,18 @@ const BadgeDetailsModal: React.FC<BadgeDetailsModalProps> = ({
   nodeData,
   isMcpServer,
 }) => {
-  const [badgeData, setBadgeData] = useState<BadgeData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    data: badgeData,
+    loading,
+    error,
+    retry: fetchBadgeDetailsData,
+  } = useIdentityDetails(
+    nodeData,
+    fetchBadgeDetails,
+    "An unexpected error occurred while fetching badge details.",
+  )
 
   useEscapeKey(isOpen, onClose)
-
-  const fetchBadgeDetailsData = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const data = await fetchBadgeDetails(nodeData)
-      setBadgeData(data)
-    } catch (error) {
-      const identityError = error as IdentityServiceError
-      console.error("Error fetching badge details:", identityError)
-      setError(
-        identityError.message ||
-          "An unexpected error occurred while fetching badge details.",
-      )
-    } finally {
-      setLoading(false)
-    }
-  }, [nodeData])
-
-  useEffect(() => {
-    if (isOpen) void fetchBadgeDetailsData()
-  }, [isOpen, fetchBadgeDetailsData])
-
-  if (!isOpen) return null
 
   const handleModalClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -130,5 +113,8 @@ const BadgeDetailsModal: React.FC<BadgeDetailsModalProps> = ({
     document.body,
   )
 }
+
+const BadgeDetailsModal: React.FC<BadgeDetailsModalProps> = (props) =>
+  props.isOpen ? <BadgeDetailsContent {...props} /> : null
 
 export default BadgeDetailsModal

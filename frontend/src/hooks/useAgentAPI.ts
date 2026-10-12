@@ -128,9 +128,9 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     } catch (error) {
       const { status, message } = parseApiError(error)
       if (status && status >= 400 && status < 500) {
-        throw new Error(`HTTP ${status} - ${message}`)
+        throw new Error(`HTTP ${status} - ${message}`, { cause: error })
       }
-      throw new Error(message)
+      throw new Error(message, { cause: error })
     } finally {
       if (requestIdRef.current === myRequestId) {
         setLoading(false)

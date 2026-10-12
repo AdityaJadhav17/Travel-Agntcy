@@ -55,6 +55,10 @@ export interface ChatHistoryItem {
 
 const CHAT_HISTORY_KEY = "travel_chat_history"
 
+async function persistBrowserState(key: string, value: unknown) {
+  localStorage.setItem(key, JSON.stringify(value))
+}
+
 const App: React.FC = () => {
   const { streamMessage, cancelStream, deleteConversation } = useAgentAPI()
   const activeChatRef = useRef<string | null>(null)
@@ -112,13 +116,11 @@ const App: React.FC = () => {
   }, [conversationMessages, isAgentLoading])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(chatHistory))
-    } catch {
+    void persistBrowserState(CHAT_HISTORY_KEY, chatHistory).catch(() => {
       setHistoryError(
         "Browser storage is full or unavailable. Chat history may not survive a reload.",
       )
-    }
+    })
   }, [chatHistory])
 
   const handlePatternChange = useCallback((pattern: PatternType) => {
@@ -142,19 +144,12 @@ const App: React.FC = () => {
   })
 
   useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(messages))
-    } catch {
+    void persistBrowserState(LOCAL_STORAGE_KEY, messages).catch(() => {
       setHistoryError(
         "Browser storage is full or unavailable. Chat history may not survive a reload.",
       )
-    }
+    })
   }, [messages])
-
-  useEffect(() => {
-    setButtonClicked(false)
-    setAiReplied(false)
-  }, [selectedPattern])
 
   const {
     height: chatHeight,
@@ -324,15 +319,6 @@ const App: React.FC = () => {
     setCurrentChatId(null)
     setConversationMessages([])
   }
-
-  useEffect(() => {
-    setCurrentUserMessage("")
-    setAgentResponse(undefined)
-    setIsAgentLoading(false)
-    setButtonClicked(false)
-    setAiReplied(false)
-    setShowFinalResponse(false)
-  }, [selectedPattern])
 
   const handleNewChat = () => {
     handleClearConversation()

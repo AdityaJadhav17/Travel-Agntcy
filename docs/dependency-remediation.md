@@ -63,6 +63,21 @@ The complete backend suite now passes 86 tests with 98.68% targeted coverage;
 Ruff and actionlint also pass. Application dependencies and runtime behavior
 are unchanged by this follow-up.
 
+## Explicit renewal, 2026-10-12
+
+The September 25 exception expired on October 9 as designed. On October 12,
+the maintainer explicitly approved renewing only `nltk==3.10.3` /
+`PYSEC-2026-3740` through **2026-10-26 at 00:00 UTC**. This was a new approval,
+not an automatic renewal. PyPI still publishes 3.10.3 as the latest release and
+the upstream advisory still lists no patched version. The complete fresh audit
+finds only this advisory. Application imports and the SDK dependency path were
+rechecked; the existing reachability assessment above still applies.
+
+The raw scanner report retains the vulnerability, and the unchanged policy
+rejects other findings, a patched release, incomplete scans and further expiry.
+See [the October 12 PR and CI report](pr-ci-remediation-2026-10-12.md) for current
+validation. The September validation below is historical.
+
 ## Validation
 
 Verified locally in Docker after the dependency updates:

@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useState, useEffect, useCallback } from "react"
+import React from "react"
 import { createPortal } from "react-dom"
-import { PolicyData } from "./types"
 import { CustomNodeData } from "../Elements/types"
-import { fetchPolicyDetails, IdentityServiceError } from "./IdentityApi"
+import { fetchPolicyDetails } from "./IdentityApi"
 import { useEscapeKey } from "@/hooks/useEscapeKey"
+import { useIdentityDetails } from "@/hooks/useIdentityDetails"
 
 const Spinner: React.FC = () => (
   <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-solid border-node-text-primary border-r-transparent"></div>
@@ -23,7 +23,7 @@ export interface PolicyDetailsModalProps {
   isMcpServer?: boolean
 }
 
-const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
+const PolicyDetailsContent: React.FC<PolicyDetailsModalProps> = ({
   isOpen,
   onClose,
   nodeName,
@@ -31,36 +31,18 @@ const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
   nodeData,
   isMcpServer,
 }) => {
-  const [policyData, setPolicyData] = useState<PolicyData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const {
+    data: policyData,
+    loading,
+    error,
+    retry: fetchPolicyDetailsData,
+  } = useIdentityDetails(
+    nodeData,
+    fetchPolicyDetails,
+    "An unexpected error occurred while fetching policy details.",
+  )
 
   useEscapeKey(isOpen, onClose)
-
-  const fetchPolicyDetailsData = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-
-    try {
-      const data = await fetchPolicyDetails(nodeData)
-      setPolicyData(data)
-    } catch (error) {
-      const identityError = error as IdentityServiceError
-      console.error("Error fetching policy details:", identityError)
-      setError(
-        identityError.message ||
-          "An unexpected error occurred while fetching policy details.",
-      )
-    } finally {
-      setLoading(false)
-    }
-  }, [nodeData])
-
-  useEffect(() => {
-    if (isOpen) void fetchPolicyDetailsData()
-  }, [isOpen, fetchPolicyDetailsData])
-
-  if (!isOpen) return null
 
   const handleModalClick = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -131,5 +113,8 @@ const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = ({
     document.body,
   )
 }
+
+const PolicyDetailsModal: React.FC<PolicyDetailsModalProps> = (props) =>
+  props.isOpen ? <PolicyDetailsContent {...props} /> : null
 
 export default PolicyDetailsModal

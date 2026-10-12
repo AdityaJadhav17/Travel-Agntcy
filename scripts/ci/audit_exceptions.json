@@ -3,8 +3,8 @@
     "package": "nltk",
     "version": "3.10.3",
     "advisory": "PYSEC-2026-3740",
-    "approved_on": "2026-09-25",
-    "expires_on": "2026-10-09",
-    "reason": "Maintainer approved on 2026-09-25 for CVE-2026-81726 / GHSA-8mgp-746c-j5xp. Required through AGNTCY App SDK -> Observe SDK -> LlamaIndex; no patched release is available. The travel app does not expose NLTK model-artifact loading/training or pass user-controlled filesystem paths to NLTK. Retain the finding, upgrade when a fix is published, and reassess if those capabilities are introduced. See docs/dependency-remediation.md."
+    "approved_on": "2026-10-12",
+    "expires_on": "2026-10-26",
+    "reason": "Maintainer explicitly reapproved this exact finding on 2026-10-12 through 2026-10-26 UTC for CVE-2026-81726 / GHSA-8mgp-746c-j5xp. Required through AGNTCY App SDK -> Observe SDK -> LlamaIndex; PyPI and the upstream advisory still list no patched release. The application and SDK dependency path were rechecked: the travel app does not expose NLTK model-artifact loading/training or pass user-controlled filesystem paths to NLTK. Retain the raw finding, upgrade when a fix is published, and reassess if those capabilities are introduced. No automatic renewal. See docs/dependency-remediation.md."
   }
 ]

@@ -83,13 +83,12 @@ const formatAgentName = (agentName: string): string => {
   return agentName
 }
 
-const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = ({
+const GroupCommunicationFeedContent: React.FC<GroupCommunicationFeedProps> = ({
   isVisible,
   onComplete,
   prompt,
   onSenderHighlight,
   graphConfig,
-  executionKey,
   apiError,
 }) => {
   const groupEvents = useGroupEvents()
@@ -109,26 +108,6 @@ const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = ({
   const handleCollapse = useCallback(() => {
     setIsExpanded(false)
   }, [])
-
-  useEffect(() => {
-    if (prompt) {
-      highlightTimeoutsRef.current.forEach(clearTimeout)
-      highlightTimeoutsRef.current = []
-
-      setIsExpanded(true)
-      lastProcessedEventRef.current = null
-    }
-  }, [prompt])
-
-  useEffect(() => {
-    if (executionKey) {
-      highlightTimeoutsRef.current.forEach(clearTimeout)
-      highlightTimeoutsRef.current = []
-
-      setIsExpanded(true)
-      lastProcessedEventRef.current = null
-    }
-  }, [executionKey])
 
   useEffect(() => {
     return () => {
@@ -303,5 +282,14 @@ const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = ({
     </div>
   )
 }
+
+const GroupCommunicationFeed: React.FC<GroupCommunicationFeedProps> = (
+  props,
+) => (
+  <GroupCommunicationFeedContent
+    key={JSON.stringify([props.prompt, props.executionKey])}
+    {...props}
+  />
+)
 
 export default GroupCommunicationFeed
