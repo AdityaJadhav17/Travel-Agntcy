@@ -28,7 +28,8 @@ dependencies = [
     # Patched minimums; uv.lock fixes the tested transitive versions.
     "langchain-core>=1.3.3,<2",
     "urllib3>=2.7.0,<3",
-    "aiohttp>=3.14.3,<4",
+    "aiohttp>=3.14.4,<4",
+    "certifi>=2026.10.19",
     "pyasn1>=0.6.4",
     "pypdf>=6.16.1",
     "filelock>=3.20.3",
