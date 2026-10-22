@@ -15,6 +15,9 @@ updates:
         patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
       vite-toolchain:
         patterns: ["vite", "@vitejs/plugin-react"]
+      typescript-toolchain:
+        # The native compiler and ESLint's compatibility API must stay paired.
+        patterns: ["typescript", "@typescript/native", "@typescript-eslint/*"]
   - package-ecosystem: uv
     directory: /
     schedule:
