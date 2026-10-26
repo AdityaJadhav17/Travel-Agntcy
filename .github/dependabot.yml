@@ -29,7 +29,7 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     ignore:
-      # agntcy-app-sdk 0.4.6 pins slim-bindings 0.6.3 / PyO3 0.24.2,
-      # which cannot build on Python 3.14. Revisit with an SDK upgrade.
+      # Keep the production runtime on the validated Python 3.13 release.
+      # Check SDK native bindings and full CI before raising the minor version.
       - dependency-name: python
         versions: [">=3.14"]

@@ -1,5 +1,11 @@
 # CI remediation, 2026-09-24
 
+Current status, **2026-10-26**: the complete dependency audit passes with zero
+known vulnerabilities and no exceptions after the NLTK and tracing dependency
+updates. The expired NLTK exception has been removed, not renewed. See
+[the October 26 report](ci-remediation-2026-10-26.md) for changes and validation.
+The September and October 12 findings and approvals below are historical.
+
 ## Fixed
 
 - CI creates `.runtime/ci` and both browser report directories as the runner user
