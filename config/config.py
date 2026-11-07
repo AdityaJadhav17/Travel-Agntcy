@@ -67,9 +67,11 @@ TRACING_ENABLED = os.getenv("TRACING_ENABLED", "false").lower() == "true"
 # =============================================================================
 ENABLE_HTTP = os.getenv("ENABLE_HTTP", "true").lower() in ("true", "1", "yes")
 
-# =============================================================================
-# Identity Service Configuration
-# =============================================================================
-# This is for demo purposes only. In production, use secure methods to manage API keys.
-IDENTITY_API_KEY = os.getenv("IDENTITY_API_KEY", "487>t:7:Ke5N[kZ[dOmDg2]0RQx))6k}bjARRN+afG3806h(4j6j[}]F5O)f[6PD")
-IDENTITY_API_SERVER_URL = os.getenv("IDENTITY_API_SERVER_URL", "https://api.agent-identity.outshift.com")
+# Explicit browser origins for the local UI or a configured deployment.
+TRAVEL_ALLOWED_ORIGINS = tuple(
+    origin.strip() for origin in os.getenv(
+        "TRAVEL_ALLOWED_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
+    ).split(",") if origin.strip()
+)
+if "*" in TRAVEL_ALLOWED_ORIGINS:
+    raise ValueError("TRAVEL_ALLOWED_ORIGINS must list explicit origins")

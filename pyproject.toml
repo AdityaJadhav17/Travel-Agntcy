@@ -22,7 +22,7 @@ dependencies = [
     "langchain>=1.3.9,<2",
     "langchain-litellm>=0.3.0",
     "llama-index-core==0.14.9",
-    "litellm==1.102.1",
+    "litellm==1.102.2",
     "agntcy-app-sdk==0.4.7",
 
     # Patched minimums; uv.lock fixes the tested transitive versions.
@@ -30,8 +30,10 @@ dependencies = [
     "urllib3>=2.7.0,<3",
     "aiohttp>=3.14.4,<4",
     "certifi>=2026.10.19",
-    "pyasn1>=0.6.4",
-    "pypdf>=6.21.1",
+    "pyasn1>=0.6.5",
+    "pypdf>=6.21.4",
+    "langgraph-sdk>=0.4.6,<0.5",
+    "msgpack>=1.2.3,<2",
     "pillow>=13.0.0",
     "filelock>=4.2.1",
     "nltk>=3.10.4,<4",

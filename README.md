@@ -97,6 +97,12 @@ docker compose down
 
 The frontend API address is a browser URL, not a Compose service name. Override
 `VITE_EXCHANGE_APP_API_URL` in the root `.env` before building if necessary.
+Published Compose ports bind to `127.0.0.1` for local development. The API allows
+browser requests from `http://localhost:3000` and `http://127.0.0.1:3000` by
+default. For another UI origin, set `TRAVEL_ALLOWED_ORIGINS` to a comma-separated
+list of exact origins in the API environment. CORS does not authenticate requests:
+keep this stack private until the API and conversation routes have user
+authentication and ownership checks.
 Compose uses `DOCKER_TRANSPORT_SERVER_ENDPOINT` (default `nats://nats:4222`),
 so a native-development `TRANSPORT_SERVER_ENDPOINT=...localhost...` cannot
 accidentally redirect containers to themselves.
@@ -117,11 +123,12 @@ Run each Python command in its own terminal **from the repository root**:
 uv run python -m agents.flight.server
 uv run python -m agents.hotel.server
 uv run python -m agents.activity.server
-uv run uvicorn agents.supervisors.travel.main:app --host 0.0.0.0 --port 8000 --reload
+uv run uvicorn agents.supervisors.travel.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Then run `npm run dev` in `frontend/`. It listens on port 3000. The backend
 loads the root `.env`; native transport defaults to `nats://localhost:4222`.
+Native agent HTTP listeners also default to `127.0.0.1`.
 No manual PYTHONPATH export is needed with these module commands. Stop existing
 Compose application containers first if their ports are occupied. Stop native
 processes with Ctrl+C and NATS with `docker compose stop nats`.

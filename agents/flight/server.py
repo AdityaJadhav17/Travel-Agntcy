@@ -41,7 +41,8 @@ async def run_http_server(server):
     """Run the HTTP/REST server."""
     try:
         port = int(os.getenv("FLIGHT_AGENT_PORT", "9001"))
-        config = Config(app=server.build(), host="0.0.0.0", port=port, loop="asyncio")
+        host = os.getenv("FLIGHT_AGENT_HOST", "127.0.0.1")
+        config = Config(app=server.build(), host=host, port=port, loop="asyncio")
         userver = Server(config)
         await userver.serve()
     except Exception:

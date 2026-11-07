@@ -34,7 +34,7 @@ from agents.supervisors.travel.graph.graph import TravelGraph
 from agents.supervisors.travel.graph.progress import progress_sink
 from agents.supervisors.travel.graph import shared
 from agents.supervisors.travel.conversations import ConversationStore, ConversationConflict, ConversationTurns
-from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED
+from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED, TRAVEL_ALLOWED_ORIGINS
 from config.logging_config import setup_logging
 from common.version import get_version_info
 
@@ -56,13 +56,12 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Add CORS middleware for frontend access
+# The browser UI sends no cookies and needs only these cross-origin API methods.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure specific origins in production
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=TRAVEL_ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
 )
 
 # Initialize the travel graph (LangGraph workflow)
@@ -322,7 +321,7 @@ async def get_prompts(pattern: str = "default"):
 if __name__ == "__main__":
     uvicorn.run(
         "agents.supervisors.travel.main:app",
-        host="0.0.0.0",
+        host="127.0.0.1",
         port=8000,
         reload=True
     )
