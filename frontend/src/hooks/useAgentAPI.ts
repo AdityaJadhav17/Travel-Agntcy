@@ -7,27 +7,17 @@ import React, { useRef, useState, useEffect } from "react"
 import axios from "axios"
 import { v4 as uuid } from "uuid"
 import { Message } from "@/types/message"
-import { BudgetAssessment } from "@/types/budget"
-import type { TravelResult } from "@/types/travelResult"
 import { isLocalDev, parseApiError, Role } from "@/utils/const"
 import { withRetry, RETRY_CONFIG } from "@/utils/retryUtils"
 import { shouldEnableRetries, getApiUrlForPattern } from "@/utils/patternUtils"
 
-interface ApiResponse {
-  response: string
-  session_id?: string
-  conversation_id?: string
-  trip_state?: Record<string, unknown>
-  budget_assessment?: BudgetAssessment | null
-  travel_result?: TravelResult | null
-  retry_hotels?: boolean
-}
-
-export type TravelStreamEvent =
-  | { type: "status"; component: string; message: string }
-  | { type: "result"; component: string; travel_result: TravelResult }
-  | { type: "error"; component: string; message: string }
-  | { type: "text"; text: string }
+import {
+  readTravelStream,
+  TravelStreamError,
+  type ApiResponse,
+  type TravelStreamEvent,
+} from "@/utils/travelStream"
+export type { ApiResponse, TravelStreamEvent } from "@/utils/travelStream"
 
 interface UseAgentAPIReturn {
   loading: boolean
@@ -41,6 +31,7 @@ interface UseAgentAPIReturn {
     pattern: string,
     conversationId: string,
     onEvent: (event: TravelStreamEvent) => void,
+    requestId?: string,
   ) => Promise<ApiResponse>
   cancelStream: (conversationId: string) => void
   deleteConversation: (conversationId: string) => Promise<void>
@@ -143,37 +134,10 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     pattern: string,
     conversationId: string,
     onEvent: (event: TravelStreamEvent) => void,
+    requestId = uuid(),
   ): Promise<ApiResponse> => {
     const controller = new AbortController()
     streamControllers.current.set(conversationId, controller)
-    const requestId = uuid()
-    let answer: ApiResponse | null = null
-    let streamError: Error | null = null
-    let buffer = ""
-    const processLine = (line: string) => {
-      if (!line.trim()) return
-      const event = JSON.parse(line) as Record<string, unknown>
-      if (event.type === "done") {
-        const result = event.result as ApiResponse | undefined
-        if (!result || typeof result.response !== "string") {
-          throw new Error("The travel service returned an invalid result.")
-        }
-        answer = result
-      } else if (
-        event.type === "status" ||
-        event.type === "result" ||
-        event.type === "text" ||
-        event.type === "error"
-      ) {
-        if (event.type === "error" && event.component === "request") {
-          streamError = new Error(
-            String(event.message || "Travel search failed."),
-          )
-        } else {
-          onEvent(event as TravelStreamEvent)
-        }
-      }
-    }
     try {
       const response = await fetch(
         `${getApiUrlForPattern(pattern)}/agent/prompt/stream`,
@@ -190,26 +154,20 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
         },
       )
       if (!response.ok || !response.body) {
-        throw new Error(`Travel service returned HTTP ${response.status}.`)
+        throw new TravelStreamError(
+          `Travel service returned HTTP ${response.status}.`,
+          undefined,
+          response.status >= 500 || response.status === 429 || response.ok,
+        )
       }
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      while (true) {
-        const { value, done } = await reader.read()
-        buffer += decoder.decode(value, { stream: !done })
-        let end = buffer.indexOf("\n")
-        while (end !== -1) {
-          processLine(buffer.slice(0, end))
-          buffer = buffer.slice(end + 1)
-          end = buffer.indexOf("\n")
-        }
-        if (done) break
-      }
-      if (buffer.trim()) processLine(buffer)
-      if (streamError) throw streamError
-      if (!answer)
-        throw new Error("The travel service ended before sending a result.")
-      return answer
+      return await readTravelStream(response.body, onEvent)
+    } catch (error) {
+      if (error instanceof TravelStreamError || controller.signal.aborted)
+        throw error
+      throw new TravelStreamError(
+        "The travel connection was interrupted. Please retry your last message.",
+        { cause: error },
+      )
     } finally {
       if (streamControllers.current.get(conversationId) === controller) {
         streamControllers.current.delete(conversationId)

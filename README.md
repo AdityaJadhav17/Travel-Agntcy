@@ -30,6 +30,9 @@ Legacy coffee/logistics tests and OASF records remain as historical examples.
 The Helm charts and directory publisher now target the current travel application;
 Docker Compose is the runtime verified end to end.
 
+See [the state-machine inventory](docs/state-machines.md) for lifecycle owners,
+transition contracts, concurrency invariants, and regression checks.
+
 ## Prerequisites
 
 For the recommended Docker path, install Docker Desktop with the Linux engine

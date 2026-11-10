@@ -1,59 +1,43 @@
 /**
  * Copyright AGNTCY Contributors (https://github.com/agntcy)
  * SPDX-License-Identifier: Apache-2.0
- *
- * Travel Planning Agent Frontend Application
- *
- * This is the main React application that provides a UI for interacting with
- * the Travel Planning Agent. It supports searching for flights and hotels.
  **/
 
-import React, { useState, useEffect, useRef, useCallback } from "react"
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useReducer,
+} from "react"
 import { LOCAL_STORAGE_KEY } from "@/components/Chat/Messages"
 import { logger } from "@/utils/logger"
 import { useChatAreaMeasurement } from "@/hooks/useChatAreaMeasurement"
 import Navigation from "@/components/Navigation/Navigation"
 import MainArea from "@/components/MainArea/MainArea"
-import { useAgentAPI } from "@/hooks/useAgentAPI"
+import { useAgentAPI, type ApiResponse } from "@/hooks/useAgentAPI"
 import ChatArea from "@/components/Chat/ChatArea"
 import Sidebar from "@/components/Sidebar/Sidebar"
 import { ThemeProvider } from "@/contexts/ThemeContext"
 import { Message } from "./types/message"
-import { getGraphConfig } from "@/utils/graphConfigs"
 import { PATTERNS, PatternType } from "@/utils/patternUtils"
 import TravelResponseCard from "@/components/Chat/TravelResponseCard"
 import StructuredTravelResultCard from "@/components/Chat/StructuredTravelResultCard"
-import { BudgetAssessment } from "@/types/budget"
-import { parseTravelResult, type TravelResult } from "@/types/travelResult"
+import { parseTravelResult } from "@/types/travelResult"
 import { Plane } from "lucide-react"
+import { ChatRequests } from "@/stores/chatRequests"
+import { TravelStreamError } from "@/utils/travelStream"
+import {
+  chatDisplayReducer,
+  restoreChatDisplay,
+  idleView,
+  type ChatHistoryItem,
+} from "@/stores/chatDisplay"
 
-interface ApiResponse {
-  response: string
-  session_id?: string
-  conversation_id?: string
-  trip_state?: Record<string, unknown>
-  budget_assessment?: BudgetAssessment | null
-  travel_result?: TravelResult | null
-  retry_hotels?: boolean
-}
-
-interface ConversationMessage {
-  role: "user" | "assistant"
-  content: string
-  budget_assessment?: BudgetAssessment | null
-  travel_result?: TravelResult | null
-  retry_hotels?: boolean
-}
-
-export interface ChatHistoryItem {
-  id: string
-  conversationId?: string
-  title: string
-  timestamp: Date
-  messages: ConversationMessage[]
-}
-
+export type { ChatHistoryItem } from "@/stores/chatDisplay"
 const CHAT_HISTORY_KEY = "travel_chat_history"
+const ignoreAnimationReply = () => {}
+const emptyMessages: ChatHistoryItem["messages"] = []
 
 async function persistBrowserState(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value))
@@ -62,57 +46,46 @@ async function persistBrowserState(key: string, value: unknown) {
 const App: React.FC = () => {
   const { streamMessage, cancelStream, deleteConversation } = useAgentAPI()
   const activeChatRef = useRef<string | null>(null)
-  const pendingChats = useRef(new Set<string>())
-  const deletedChats = useRef(new Set<string>())
-  const requestVersions = useRef(new Map<string, number>())
+  const requests = useRef(new ChatRequests())
   const [historyError, setHistoryError] = useState("")
-
   const [selectedPattern, setSelectedPattern] = useState<PatternType>(
     PATTERNS.TRAVEL_SEARCH,
   )
-
-  const [aiReplied, setAiReplied] = useState<boolean>(false)
-  const [buttonClicked, setButtonClicked] = useState<boolean>(false)
-  const [currentUserMessage, setCurrentUserMessage] = useState<string>("")
-  const [agentResponse, setAgentResponse] = useState<ApiResponse | undefined>(
-    undefined,
-  )
-  const [isAgentLoading, setIsAgentLoading] = useState<boolean>(false)
-  const [progressStatus, setProgressStatus] = useState("")
-  const [partialResult, setPartialResult] = useState<TravelResult | null>(null)
-  const [streamText, setStreamText] = useState("")
-  const [apiError, setApiError] = useState<boolean>(false)
-  const [showFinalResponse, setShowFinalResponse] = useState<boolean>(false)
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true)
-
-  // Chat history state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
-  const [chatHistory, setChatHistory] = useState<ChatHistoryItem[]>(() => {
+  const [display, dispatch] = useReducer(chatDisplayReducer, undefined, () => {
     try {
-      const saved = JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || "[]")
-      return Array.isArray(saved)
-        ? saved.map((chat: ChatHistoryItem) => ({
-            ...chat,
-            timestamp: new Date(chat.timestamp),
-          }))
-        : []
+      return restoreChatDisplay(
+        JSON.parse(localStorage.getItem(CHAT_HISTORY_KEY) || "[]"),
+      )
     } catch {
-      return []
+      return restoreChatDisplay(null)
     }
   })
-  const [conversationMessages, setConversationMessages] = useState<
-    ConversationMessage[]
-  >([])
+  const chatHistory = display.history
+  const currentChat = chatHistory.find((chat) => chat.id === currentChatId)
+  const view = currentChatId
+    ? (display.views.get(currentChatId) ?? idleView)
+    : idleView
+  const conversationMessages = currentChat?.messages ?? emptyMessages
+  const isAgentLoading = view.phase === "pending"
+  const buttonClicked = view.phase === "pending" && view.animate
+  const aiReplied = view.phase === "succeeded" || view.phase === "failed"
+  const progressStatus = view.phase === "pending" ? view.status : ""
+  const partialResult = view.phase === "pending" ? view.partial : null
+  const streamText = view.phase === "pending" ? view.text : ""
+  const animationToken = view.phase === "pending" ? view.token : null
+  const setButtonClicked = useCallback(
+    (clicked: boolean) => {
+      if (!clicked && animationToken)
+        dispatch({ type: "animated", token: animationToken })
+    },
+    [animationToken],
+  )
 
-  // Ref for scrolling to bottom
   const messagesEndRef = useRef<HTMLDivElement>(null)
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }
-
   useEffect(() => {
-    scrollToBottom()
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [conversationMessages, isAgentLoading])
 
   useEffect(() => {
@@ -123,17 +96,7 @@ const App: React.FC = () => {
     })
   }, [chatHistory])
 
-  const handlePatternChange = useCallback((pattern: PatternType) => {
-    setShowFinalResponse(false)
-    setAgentResponse(undefined)
-    setIsAgentLoading(false)
-    setApiError(false)
-    setCurrentUserMessage("")
-    setButtonClicked(false)
-    setAiReplied(false)
-    setSelectedPattern(pattern)
-  }, [])
-
+  // Retained only for the compatibility composer path.
   const [messages, setMessages] = useState<Message[]>(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || "[]")
@@ -142,7 +105,6 @@ const App: React.FC = () => {
       return []
     }
   })
-
   useEffect(() => {
     void persistBrowserState(LOCAL_STORAGE_KEY, messages).catch(() => {
       setHistoryError(
@@ -155,37 +117,29 @@ const App: React.FC = () => {
     height: chatHeight,
     isExpanded,
     chatRef,
-  } = useChatAreaMeasurement({
-    debounceMs: 100,
-  })
+  } = useChatAreaMeasurement({ debounceMs: 100 })
+  const chatHeightValue = conversationMessages.length ? chatHeight : 76
+  const handlePatternChange = useCallback(
+    (pattern: PatternType) => setSelectedPattern(pattern),
+    [],
+  )
 
-  const chatHeightValue = currentUserMessage || agentResponse ? chatHeight : 76
-
-  const handleUserInput = async (query: string) => {
+  const handleUserInput = async (query: string, recover = false) => {
+    if (!query.trim()) return
     const chatId = activeChatRef.current || crypto.randomUUID()
-    if (pendingChats.current.has(chatId)) return
     const existingChat = chatHistory.find((chat) => chat.id === chatId)
     const conversationId = existingChat?.conversationId || crypto.randomUUID()
+    const token = requests.current.start(chatId, conversationId)
+    if (!token) return
+    const requestId =
+      recover &&
+      existingChat?.conversationId &&
+      existingChat.pendingRequest?.prompt === query
+        ? existingChat.pendingRequest.id
+        : crypto.randomUUID()
     activeChatRef.current = chatId
     setCurrentChatId(chatId)
-    pendingChats.current.add(chatId)
-    const version = (requestVersions.current.get(chatId) || 0) + 1
-    requestVersions.current.set(chatId, version)
-    setProgressStatus("Starting search")
-    setPartialResult(null)
-    setStreamText("")
     setHistoryError("")
-    setCurrentUserMessage(query)
-    setIsAgentLoading(true)
-    setButtonClicked(true)
-    setAiReplied(false)
-    setApiError(false)
-    setShowFinalResponse(true)
-    const newMessages = [
-      ...conversationMessages,
-      { role: "user" as const, content: query },
-    ]
-    setConversationMessages(newMessages)
     const entry: ChatHistoryItem = {
       id: chatId,
       conversationId,
@@ -193,205 +147,109 @@ const App: React.FC = () => {
         existingChat?.title ||
         (query.length > 35 ? query.substring(0, 35) + "..." : query),
       timestamp: new Date(),
-      messages: newMessages,
+      messages: recover
+        ? (existingChat?.messages ?? [])
+        : [...(existingChat?.messages ?? []), { role: "user", content: query }],
+      pendingRequest: { id: requestId, prompt: query },
     }
-    setChatHistory((previous) => [
-      entry,
-      ...previous.filter((chat) => chat.id !== chatId),
-    ])
+    dispatch({ type: "start", token, entry })
     let response: ApiResponse
     let failed = false
+    let recoverable = false
     try {
       response = await streamMessage(
         query,
         selectedPattern,
         conversationId,
         (event) => {
-          if (
-            requestVersions.current.get(chatId) !== version ||
-            activeChatRef.current !== chatId
-          )
-            return
+          if (!requests.current.isCurrent(token)) return
           if (event.type === "status" || event.type === "error") {
-            setProgressStatus(event.message)
+            dispatch({ type: "status", token, message: event.message })
           } else if (event.type === "result") {
-            setPartialResult(parseTravelResult(event.travel_result))
+            dispatch({
+              type: "partial",
+              token,
+              result: parseTravelResult(event.travel_result),
+            })
           } else if (event.type === "text") {
-            setStreamText((text) => text + event.text)
+            dispatch({ type: "text", token, text: event.text })
           }
         },
+        requestId,
       )
     } catch (error) {
       failed = true
+      recoverable = error instanceof TravelStreamError && error.retryable
       logger.apiError("/agent/prompt", error)
       response = {
         response: error instanceof Error ? error.message : String(error),
       }
     }
-    pendingChats.current.delete(chatId)
-    if (
-      deletedChats.current.has(chatId) ||
-      requestVersions.current.get(chatId) !== version
-    )
+    if (!requests.current.finish(token, failed ? "failed" : "succeeded")) return
+    if (recoverable) {
+      dispatch({ type: "interrupt", token, message: response.response })
       return
-    const updatedMessages = [
-      ...newMessages,
-      {
-        role: "assistant" as const,
+    }
+    dispatch({
+      type: "finish",
+      token,
+      outcome: failed ? "failed" : "succeeded",
+      message: {
+        role: "assistant",
         content: response.response,
         budget_assessment: response.budget_assessment,
         travel_result: response.travel_result,
         retry_hotels: response.retry_hotels,
       },
-    ]
-    setChatHistory((previous) =>
-      previous.map((chat) =>
-        chat.id === chatId ? { ...chat, messages: updatedMessages } : chat,
-      ),
-    )
-    if (activeChatRef.current !== chatId) return
-    setConversationMessages(updatedMessages)
-    setAgentResponse(response)
-    setIsAgentLoading(false)
-    setProgressStatus("")
-    setPartialResult(null)
-    setStreamText("")
-    setButtonClicked(false)
-    setAiReplied(true)
-    setApiError(failed)
+    })
   }
 
-  const handleApiResponse = (
-    response: ApiResponse | string,
-    isError = false,
-  ) => {
-    setAgentResponse(typeof response === "string" ? { response } : response)
-    setApiError(isError)
+  const stopChat = (chatId: string) => {
+    const token = requests.current.stop(chatId)
+    if (!token) return
+    cancelStream(token.conversationId)
+    dispatch({ type: "stop", token })
   }
-
-  const handleDropdownSelect = async (query: string) => {
-    handleUserInput(query)
-  }
-
   const handleStop = () => {
-    const chatId = activeChatRef.current
-    if (!chatId || !pendingChats.current.has(chatId)) return
-    const chat = chatHistory.find((item) => item.id === chatId)
-    if (!chat?.conversationId) return
-    requestVersions.current.set(
-      chatId,
-      (requestVersions.current.get(chatId) || 0) + 1,
-    )
-    cancelStream(chat.conversationId)
-    pendingChats.current.delete(chatId)
-    const stopped: ConversationMessage = {
-      role: "assistant",
-      content: "Search stopped. Late results will be ignored.",
-    }
-    setConversationMessages((previous) => [...previous, stopped])
-    setChatHistory((previous) =>
-      previous.map((item) =>
-        item.id === chatId
-          ? { ...item, messages: [...item.messages, stopped] }
-          : item,
-      ),
-    )
-    setIsAgentLoading(false)
-    setProgressStatus("")
-    setPartialResult(null)
-    setStreamText("")
-    setButtonClicked(false)
+    if (activeChatRef.current) stopChat(activeChatRef.current)
   }
-
   const handleClearConversation = () => {
     activeChatRef.current = null
     setHistoryError("")
     setMessages([])
-    setCurrentUserMessage("")
-    setAgentResponse(undefined)
-    setIsAgentLoading(false)
-    setProgressStatus("")
-    setPartialResult(null)
-    setStreamText("")
-    setButtonClicked(false)
-    setAiReplied(false)
-    setShowFinalResponse(false)
     setCurrentChatId(null)
-    setConversationMessages([])
   }
-
-  const handleNewChat = () => {
-    handleClearConversation()
-  }
-
+  const handleNewChat = handleClearConversation
   const handleSelectChat = (chatId: string) => {
-    const selectedChat = chatHistory.find((chat) => chat.id === chatId)
-    if (selectedChat && selectedChat.messages.length > 0) {
-      setAgentResponse(undefined)
-      setApiError(false)
-      activeChatRef.current = chatId
-      setIsAgentLoading(pendingChats.current.has(chatId))
-      setProgressStatus(
-        pendingChats.current.has(chatId) ? "Search in progress" : "",
-      )
-      setPartialResult(null)
-      setStreamText("")
-      setHistoryError(
-        selectedChat.conversationId
-          ? ""
-          : "This older chat has no saved AI memory. Please restate your trip details once.",
-      )
-      setCurrentChatId(chatId)
-      setConversationMessages(selectedChat.messages)
-
-      const lastUserMsg = [...selectedChat.messages]
-        .reverse()
-        .find((m) => m.role === "user")
-      const lastAssistantMsg = [...selectedChat.messages]
-        .reverse()
-        .find((m) => m.role === "assistant")
-
-      if (lastUserMsg) {
-        setCurrentUserMessage(lastUserMsg.content)
-      }
-      if (lastAssistantMsg) {
-        setAgentResponse({ response: lastAssistantMsg.content })
-        setShowFinalResponse(true)
-      }
-      setButtonClicked(false)
-      setAiReplied(true)
-    }
+    const chat = chatHistory.find((item) => item.id === chatId)
+    if (!chat) return
+    activeChatRef.current = chatId
+    setCurrentChatId(chatId)
+    setHistoryError(
+      chat.conversationId
+        ? ""
+        : "This older chat has no saved AI memory. Please restate your trip details once.",
+    )
   }
-
   const handleDeleteChat = async (chatId: string) => {
     const chat = chatHistory.find((item) => item.id === chatId)
+    stopChat(chatId)
+    if (!requests.current.beginDelete(chatId)) return
+    dispatch({ type: "delete-start", chatId })
     try {
-      if (chat?.conversationId && pendingChats.current.has(chatId)) {
-        cancelStream(chat.conversationId)
-        requestVersions.current.set(
-          chatId,
-          (requestVersions.current.get(chatId) || 0) + 1,
-        )
-        pendingChats.current.delete(chatId)
-      }
       if (chat?.conversationId) await deleteConversation(chat.conversationId)
-      deletedChats.current.add(chatId)
-      setChatHistory((previous) =>
-        previous.filter((item) => item.id !== chatId),
-      )
+      requests.current.finishDelete(chatId, true)
+      dispatch({ type: "delete-done", chatId })
       if (activeChatRef.current === chatId) handleClearConversation()
     } catch {
+      requests.current.finishDelete(chatId, false)
+      dispatch({ type: "delete-failed", chatId })
       setHistoryError(
         "Could not delete the saved conversation. Please try again.",
       )
     }
   }
-
-  const handleToggleSidebar = () => {
-    setIsSidebarOpen(!isSidebarOpen)
-  }
-
-  // Show welcome section only when it's a fresh new chat (no messages)
+  const handleToggleSidebar = () => setIsSidebarOpen((open) => !open)
   const showWelcome = conversationMessages.length === 0
 
   return (
@@ -432,7 +290,7 @@ const App: React.FC = () => {
                       buttonClicked={buttonClicked}
                       setButtonClicked={setButtonClicked}
                       aiReplied={aiReplied}
-                      setAiReplied={setAiReplied}
+                      setAiReplied={ignoreAnimationReply}
                       chatHeight={chatHeightValue}
                       isExpanded={isExpanded}
                       groupCommResponseReceived={false}
@@ -470,7 +328,7 @@ const App: React.FC = () => {
                     buttonClicked={buttonClicked}
                     setButtonClicked={setButtonClicked}
                     aiReplied={aiReplied}
-                    setAiReplied={setAiReplied}
+                    setAiReplied={ignoreAnimationReply}
                     chatHeight={chatHeightValue}
                     isExpanded={isExpanded}
                     groupCommResponseReceived={false}
@@ -568,6 +426,33 @@ const App: React.FC = () => {
                   ))}
 
                   {/* Loading indicator */}
+                  {view.phase === "interrupted" && (
+                    <div className="mb-6 space-y-3 rounded-lg border border-amber-300/30 p-4 text-sm text-amber-100">
+                      <p role="status">
+                        {currentChat?.recoveryError ||
+                          "This search was interrupted when the page closed."}{" "}
+                        It may have finished on the server. Retry the last
+                        message to retrieve a saved result when available, or
+                        search again.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const last = conversationMessages.at(-1)
+                          if (last?.role === "user")
+                            void handleUserInput(last.content, true)
+                        }}
+                        className="rounded-lg border border-amber-200 px-3 py-2 hover:bg-amber-200/10"
+                      >
+                        Retry last message
+                      </button>
+                    </div>
+                  )}
+                  {view.phase === "deleting" && (
+                    <p role="status" className="mb-6 text-sm text-gray-300">
+                      Deleting conversation...
+                    </p>
+                  )}
                   {isAgentLoading && (
                     <div className="mb-6 flex items-start gap-4">
                       <div
@@ -612,26 +497,31 @@ const App: React.FC = () => {
               <ChatArea
                 setMessages={setMessages}
                 setButtonClicked={setButtonClicked}
-                setAiReplied={setAiReplied}
+                setAiReplied={ignoreAnimationReply}
                 isBottomLayout={true}
                 showCoffeePrompts={false}
                 showLogisticsPrompts={false}
                 showProgressTracker={false}
                 showAuctionStreaming={false}
-                showFinalResponse={showFinalResponse}
                 onStreamComplete={() => {}}
                 onSenderHighlight={() => {}}
                 pattern={selectedPattern}
-                graphConfig={getGraphConfig(selectedPattern, false)}
-                onDropdownSelect={handleDropdownSelect}
-                onUserInput={handleUserInput}
-                onApiResponse={handleApiResponse}
+                onUserInput={(query) => {
+                  const chatId = activeChatRef.current
+                  if (
+                    chatId &&
+                    ["pending", "deleting", "deleted"].includes(
+                      requests.current.phase(chatId),
+                    )
+                  )
+                    return false
+                  void handleUserInput(query)
+                  return true
+                }}
                 onClearConversation={handleClearConversation}
-                currentUserMessage={currentUserMessage}
-                agentResponse={agentResponse}
                 executionKey=""
-                isAgentLoading={isAgentLoading}
-                apiError={apiError}
+                isAgentLoading={isAgentLoading || view.phase === "deleting"}
+                apiError={view.phase === "failed"}
                 chatRef={chatRef}
                 auctionState={{
                   events: [],
