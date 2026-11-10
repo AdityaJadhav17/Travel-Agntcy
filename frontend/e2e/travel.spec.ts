@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto"
-import { test, expect, type Page, type Response } from "@playwright/test"
+import { test, expect, type Page } from "@playwright/test"
+import { observeTravelStreams, observedStreamResult } from "./streamObserver"
+
+test.beforeEach(async ({ page }) => {
+  await observeTravelStreams(page)
+})
 
 const api = process.env.E2E_API_URL || "http://localhost:8000"
 const start = new Date(Date.now() + 60 * 86400000).toISOString().slice(0, 10)
@@ -15,17 +20,7 @@ async function send(page: Page, prompt: string) {
   await page.getByRole("textbox").press("Enter")
   const result = await response
   expect(result.status()).toBe(200)
-  return streamResult(result)
-}
-
-async function streamResult(response: Response) {
-  const events = (await response.text())
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line))
-  const done = events.find((event) => event.type === "done")
-  expect(done, JSON.stringify(events)).toBeTruthy()
-  return done.result
+  return observedStreamResult(page, result)
 }
 
 test("structured cards survive rewritten narrative and reload", async ({
@@ -176,7 +171,7 @@ test("flight explanation and nearby dates remain grounded after reload", async (
     reply.url().endsWith("/agent/prompt/stream"),
   )
   await page.getByRole("button", { name: "Compare cheaper dates" }).click()
-  const compared = await streamResult(await response)
+  const compared = await observedStreamResult(page, await response)
   expect(compared.travel_result.kind).toBe("date_comparison")
   expect(compared.travel_result.base_fare_usd).toBe(240)
   expect(compared.travel_result.date_alternatives).toHaveLength(7)
@@ -214,7 +209,7 @@ test("hotel failure keeps flights and retries hotels after reload", async ({
     reply.url().endsWith("/agent/prompt/stream"),
   )
   await page.getByRole("button", { name: "Retry hotels" }).click()
-  const completed = await streamResult(await response)
+  const completed = await observedStreamResult(page, await response)
   expect(completed.travel_result.kind).toBe("full_trip")
   expect(completed.travel_result.total_usd).toBe(540)
   expect(completed.partial_search).toBeNull()
@@ -345,7 +340,7 @@ test("a late answer stays with its chat and new chats start without trip context
   await page
     .getByRole("button", { name: "Plan New York.", exact: true })
     .click()
-  const tokyo = await streamResult(await response)
+  const tokyo = await observedStreamResult(page, await response)
   expect(tokyo.trip_state.destination).toBe("NRT")
   expect(tokyo.trip_state.origin).toBeFalsy()
   await expect(

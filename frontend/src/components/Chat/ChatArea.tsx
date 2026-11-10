@@ -32,7 +32,7 @@ interface ChatAreaProps {
   pattern?: string
   graphConfig?: any
   onDropdownSelect?: (query: string) => void
-  onUserInput?: (query: string) => void
+  onUserInput?: (query: string) => boolean | void
   onApiResponse?: (response: string, isError?: boolean) => void
   onClearConversation?: () => void
   currentUserMessage?: string
@@ -130,8 +130,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
 
     if (onUserInput) {
       const messageContent = content
-      setContent("")
-      onUserInput(messageContent)
+      if (onUserInput(messageContent) !== false) setContent("")
       return
     }
 
