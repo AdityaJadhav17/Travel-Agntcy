@@ -516,8 +516,7 @@ def _parse_hotel(property_data: dict, check_in_date: str, check_out_date: str = 
     """
     Parse a hotel property from SerpAPI response into a normalized format.
     
-    Note: SerpAPI Google Hotels may not always return check-in time.
-    We default to 15:00 (3 PM) which is the standard hotel industry check-in time.
+    Missing provider check-in times remain unknown; no standard time is inserted.
     
     Extracts various rating categories:
     - overall_rating: General hotel rating (1-5 scale)
@@ -571,9 +570,16 @@ def _parse_hotel(property_data: dict, check_in_date: str, check_out_date: str = 
         if not location_rating:
             location_rating = property_data.get("location_rating", 0) or 0
         
-        # Check-in time from API (rarely provided)
-        # Default to 15:00 (3 PM) - standard hotel industry check-in time
-        check_in_time = property_data.get("check_in_time", "15:00")
+        # Keep provider timing evidence verbatim; missing time must remain unknown.
+        check_in_time = property_data.get("check_in_time")
+        check_out_time = property_data.get("check_out_time")
+        # SerpAPI documents `type` (for example hotel or vacation rental), but
+        # does not document a room privacy or check-in closing field.
+        property_type = str(property_data.get("type"))[:80] if property_data.get("type") else None
+        room_type = None
+        accommodation_source = "serpapi_google_hotels" if any(
+            value not in (None, "") for value in (property_type, room_type)
+        ) else None
         
         # Extract amenities for user reference
         amenities = property_data.get("amenities", [])
@@ -593,7 +599,11 @@ def _parse_hotel(property_data: dict, check_in_date: str, check_out_date: str = 
             "location_rating": location_rating,  # Location-specific rating
             "hotel_class": hotel_class,  # Star rating (e.g., 3, 4, 5 stars)
             "check_in_time": check_in_time,
+            "check_out_time": check_out_time,
             "check_in_date": check_in_date,
+            "property_type": property_type,
+            "room_type": room_type,
+            "accommodation_evidence_source": accommodation_source,
             "amenities": amenities,
         }
     except Exception as e:

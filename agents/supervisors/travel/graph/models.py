@@ -50,6 +50,14 @@ class TravelSearchArgs(TravelParty):
     budget_currency: Optional[str] = Field(default=None, pattern=r"^[A-Z]{3}$", description="Explicit ISO currency code, e.g. USD; null if ambiguous")
     budget_scope: Optional[Literal["quoted_total", "per_night", "per_person", "all_in"]] = Field(default=None, description="quoted_total means the current search's flight fare and/or full hotel stay; do not assume scope when unclear")
     clarification_question: str = Field(default="", description="A short question for ambiguous input; empty when unambiguous")
+    include_activities: Optional[bool] = Field(default=None, description="For combined trips, whether activity suggestions are requested; null preserves legacy full-trip behavior")
+    flight_result_count: Optional[int] = Field(default=None, ge=1, le=100, strict=True, description="Requested flight options to display; maximum five are supported")
+    hotel_result_count: Optional[int] = Field(default=None, ge=1, le=100, strict=True, description="Requested hotel options to display; maximum five are supported")
+    activity_result_count: Optional[int] = Field(default=None, ge=1, le=100, strict=True, description="Requested activity options to display; maximum five are supported")
+    accommodation_type: Optional[Literal["hotel", "hostel", "any"]] = Field(default=None, description="Explicitly allowed accommodation category")
+    private_room_required: Optional[bool] = Field(default=None, description="Whether an explicitly private room is required")
+    hotel_check_in_date: Optional[str] = Field(default=None, description="Explicit hotel check-in date in YYYY-MM-DD format")
+    hotel_check_out_date: Optional[str] = Field(default=None, description="Explicit hotel check-out date in YYYY-MM-DD format")
     search_type: Literal["full_trip", "flight_only", "hotel_only", "activity_only"] = Field(
         default="full_trip",
         description="Type of search: 'full_trip' (flight+hotel+activities), 'flight_only', 'hotel_only', 'activity_only'"

@@ -47,7 +47,8 @@ def test_saved_explanation_has_grounded_costs_and_search_age():
     response = explain_recommendation(saved)
     assert "USD 240.00 flight fare + USD 300.00 full hotel stay = USD 540.00" in response
     assert "USD 60.00 remaining" in response
-    assert "1 eligible returned combinations" in response
+    assert "1 non-contradicted combinations" in response
+    assert "suitability remains provisional" in response
     assert "Saved Hotel" in response and "Saved Air" in response
     assert "saved search from" in response and "UTC" in response
     assert "prices and availability have not been refreshed" in response
@@ -91,6 +92,46 @@ def test_snapshot_is_bounded_and_omits_provider_tokens():
     assert quote_facts({**flight, "return_flight": {"airline": "Other Air"}}, "flight", params).id != saved["flight"]["id"]
     assert saved["version"] == 2
     assert "secret_provider_token" not in json.dumps(saved["flight_itinerary"])
+
+
+def test_explicit_hotel_dates_change_only_hotel_quote_identity_and_explanation():
+    params = trip()
+    flight, hotel = quotes(params)
+    original_hotel_id = quote_facts(hotel, "hotel", params).id
+    original_flight_id = quote_facts(flight, "flight", params).id
+    # Legacy state without the additive date fields retains its pre-change ID.
+    legacy = TravelSearchArgs.model_validate(params.model_dump(exclude={"hotel_check_in_date", "hotel_check_out_date"}))
+    assert quote_facts(hotel, "hotel", legacy).id == original_hotel_id
+    dated = params.model_copy(update={
+        "hotel_check_in_date": str(date.fromisoformat(params.start_date) + timedelta(days=1)),
+        "hotel_check_out_date": str(date.fromisoformat(params.end_date) + timedelta(days=1)),
+    })
+    assert quote_facts(hotel, "hotel", dated).id != original_hotel_id
+    assert quote_facts(flight, "flight", dated).id == original_flight_id
+    pref_changed = dated.model_copy(update={"accommodation_type": "hotel", "private_room_required": True})
+    assert quote_facts(hotel, "hotel", pref_changed).id == quote_facts(hotel, "hotel", dated).id
+
+
+def test_explicit_hotel_dates_equal_to_defaults_preserve_legacy_quote_id():
+    params = trip()
+    flight, hotel = quotes(params)
+    legacy = TravelSearchArgs.model_validate(params.model_dump(exclude={"hotel_check_in_date", "hotel_check_out_date"}))
+    explicit_defaults = params.model_copy(update={
+        "hotel_check_in_date": params.start_date,
+        "hotel_check_out_date": params.end_date,
+    })
+    assert quote_facts(hotel, "hotel", explicit_defaults).id == quote_facts(hotel, "hotel", legacy).id
+
+
+def test_saved_explanation_keeps_flight_dates_separate_from_hotel_stay_dates():
+    params = trip(
+        hotel_check_in_date=str(date.fromisoformat(trip().start_date) + timedelta(days=1)),
+        hotel_check_out_date=str(date.fromisoformat(trip().end_date) + timedelta(days=1)),
+    )
+    saved = snapshot(params)
+    response = explain_recommendation(saved)
+    assert f"flight dates {params.start_date} to {params.end_date}" in response
+    assert f"Hotel stay dates: {params.hotel_check_in_date} to {params.hotel_check_out_date}" in response
 
 
 @pytest.mark.parametrize("saved,phrase", [(None, "don't have a saved"), ({"version": 99}, "can't reliably read")])

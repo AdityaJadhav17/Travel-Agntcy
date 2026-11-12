@@ -46,7 +46,9 @@ def quote_total(quote, kind, params):
         return money(quote["total_price"])
     nightly = money(quote.get("price"))
     try:
-        nights = (date.fromisoformat(params.end_date) - date.fromisoformat(params.start_date)).days
+        check_in = (getattr(params, "hotel_check_in_date", None) or params.start_date) if kind == "hotel" else params.start_date
+        check_out = (getattr(params, "hotel_check_out_date", None) or params.end_date) if kind == "hotel" else params.end_date
+        nights = (date.fromisoformat(check_out) - date.fromisoformat(check_in)).days
     except (TypeError, ValueError):
         return None
     return nightly * nights if nightly and nights > 0 else None

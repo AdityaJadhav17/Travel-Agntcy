@@ -36,6 +36,24 @@ supported, so the assistant discloses that limitation and offers hotel-only sear
 Hotel searches receive adults, children, and each child's age; ages below one are
 sent as one, following the provider's documented convention.
 
+The requested `rooms` value describes party occupancy and the provider's room
+count support. It is not evidence that a quote is private. A private-room request
+is tracked separately and is considered matched only when normalized
+provider-supported room evidence identifies a private room. A hotel/property
+label alone does not prove room privacy. Known hostels can be excluded when the
+user asked for hotels only; a broad accommodation request can allow hostels.
+Missing or conflicting property/room details remain unknown or contradicted and
+are shown with that status rather than being described as private. When no
+confirmed result meets a requirement, the assistant explains the limitation
+instead of silently substituting shared accommodation.
+
+Hotel check-in and check-out dates are persisted independently from flight
+departure and return dates. A next-day arrival at a prior-night booking is
+provisional unless evidence confirms late-arrival handling or reservation
+retention. Arrival before check-in may mean waiting; arrival at or after checkout
+cannot be represented as a usable stay. The card shows the hotel dates and any
+timing confirmation notice separately from the flight itinerary.
+
 The documented hotel API has no room-count parameter. Multiple requested rooms
 remain saved, but hotel/full-trip search pauses with an explicit limitation and
 offers one room or flights only. It never multiplies a single-room quote to invent

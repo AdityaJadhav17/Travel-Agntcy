@@ -4,6 +4,7 @@ import {
   readTravelStream,
   type TravelStreamEvent,
 } from "../src/utils/travelStream"
+import { parseTravelResult } from "../src/types/travelResult"
 
 const done = (response = "Finished") =>
   JSON.stringify({ type: "done", result: { response } })
@@ -155,6 +156,70 @@ test("valid optional final fields survive validation", async () => {
       () => {},
     ),
   ).toEqual(result)
+})
+
+test("travel result parser accepts legacy hotel cards and validates optional evidence fields", () => {
+  const legacy = {
+    version: 1,
+    kind: "hotel_only",
+    searched_at: "2026-11-10T00:00:00Z",
+    origin: "",
+    destination: "New York",
+    start_date: "2026-12-10",
+    end_date: "2026-12-12",
+    adults: 1,
+    children: 0,
+    rooms: 1,
+    is_one_way: false,
+    flights: [],
+    hotels: [
+      {
+        id: "hotel-legacy",
+        name: "Legacy Hotel",
+        nightly_usd: 100,
+        total_usd: 200,
+        overall_rating: null,
+        location_rating: null,
+      },
+    ],
+    activities: [],
+    total_usd: null,
+    notice: "",
+  }
+  expect(parseTravelResult(legacy)?.hotels[0]).toMatchObject({
+    name: "Legacy Hotel",
+  })
+  expect(
+    parseTravelResult({
+      ...legacy,
+      hotels: [
+        {
+          ...legacy.hotels[0],
+          room_type: "private room",
+          accommodation_status: "matched",
+          accommodation_evidence: {
+            property_type: "hotel",
+            room_type: "private room",
+            source: "provider room details",
+          },
+          check_in_date: "2026-12-10",
+          check_out_date: "2026-12-12",
+          timing_status: "needs_confirmation",
+          timing_message: "Late arrival retention needs confirmation.",
+          provisional: true,
+        },
+      ],
+      hotel_check_in_date: "2026-12-10",
+      hotel_check_out_date: "2026-12-12",
+      hotel_result_count: 3,
+    })?.hotels[0].provisional,
+  ).toBe(true)
+  expect(
+    parseTravelResult({
+      ...legacy,
+      hotels: [{ ...legacy.hotels[0], timing_status: "certain" }],
+    }),
+  ).toBeNull()
 })
 
 test("EOF without done fails even after text; failure remains terminal", async () => {

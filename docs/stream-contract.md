@@ -28,6 +28,26 @@ scope/message. Otherwise it becomes `null`. IDs must be strings, `trip_state`
 must be an object, and `retry_hotels` must be boolean; invalid optional fields
 are omitted. The browser does not coerce objects or arrays into display strings.
 
+Version 1 travel cards may include optional `flight_result_count`,
+`hotel_result_count` and `activity_result_count` request values (1–100). The
+display contract remains at most five cards per comparison category. Missing
+counts use the legacy five-card default. Text and cards use the same selected
+prefix; a request above five or a short result set carries a notice. Combined
+trip results continue to contain one selected flight/hotel pair, plus optional
+activity suggestions.
+
+Hotel cards may add bounded `property_type`, `room_type`,
+`accommodation_evidence_source`, `accommodation_evidence`,
+`accommodation_status` (`matched`, `contradicted` or `unknown`), and
+`accommodation_reasons`. Unknown or absent status is rendered as unverified,
+including for saved version 1 cards that predate these fields. Optional
+`hotel_check_in_date` and `hotel_check_out_date` describe the hotel stay
+separately from flight dates; per-hotel `check_in_date` and `check_out_date`
+may also be present. Optional timing fields (`timing_status`,
+`timing_reason_codes`, `timing_message`, `arrival_at_hotel` and `provisional`)
+carry uncertainty through to the card. Old cards without these fields remain
+valid and do not gain an inferred privacy or timing claim.
+
 ## Lifecycle and ownership
 
 The parser starts `pending`. The first `done` changes it to `completed`; the first
@@ -62,6 +82,10 @@ Server request-error events are definitive; HTTP 429 and 5xx remain retryable.
 consumer, including byte-split Unicode, CRLF, unterminated final lines, malformed
 payloads, first-terminal precedence, optional-data fallback, EOF, network failure,
 intentional abort, lingering bodies, and reader cleanup.
+
+The same pure suite checks that a legacy hotel card still parses, valid optional
+lodging evidence and timing fields parse, and an unsupported timing status falls
+back to narrative rendering.
 
 `frontend/e2e/streamContract.spec.ts` checks visible errors, composer recovery,
 and persistence of the first complete answer across reload. Existing browser

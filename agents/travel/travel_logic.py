@@ -15,10 +15,12 @@ Key functions:
 """
 
 import logging
+import math
 from datetime import datetime, timedelta
 from typing import Optional
 
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
+from agents.travel.lodging import assess_accommodation, assess_timing
 
 logger = logging.getLogger("lungo.travel.travel_logic")
 
@@ -302,147 +304,111 @@ def find_cheapest_plan(
     gap_hours: Optional[int] = None,
     min_overall_rating: float = MIN_OVERALL_RATING,
     min_location_rating: float = MIN_LOCATION_RATING,
+    *,
+    check_in_date: str | None = None,
+    check_out_date: str | None = None,
+    accommodation_type: str | None = None,
+    private_room_required: bool | None = None,
 ) -> Optional[dict]:
+    """Choose the lowest priced non-contradicted pair, preferring confirmed timing.
+
+    Uncertain timing remains a provisional result with explicit reasons. Known
+    incompatible arrivals and contradicted accommodation are never selected.
     """
-    Find the cheapest flight + hotel combination that meets timing and rating constraints.
-    
-    This function iterates through all flight options, filters hotels that are
-    valid for each flight's arrival time AND meet rating thresholds, then finds 
-    the combination with the lowest total price (flight + hotel).
-    
-    Algorithm:
-    1. Filter hotels by minimum overall rating (>=3.7) and location rating (>=4.0)
-    2. For each flight, extract arrival datetime
-    3. Filter remaining hotels that allow check-in after arrival + gap_hours
-    4. Find cheapest valid hotel for that flight
-    5. Track minimum total cost across all combinations
-    6. Return the best plan
-    
-    Args:
-        flights: List of flight options from search_flights()
-        hotels: List of hotel options from search_hotels()
-        gap_hours: Minimum hours between flight arrival and hotel check-in.
-                   Defaults to TRAVEL_HOTEL_CHECKIN_GAP_HOURS from config.
-        min_overall_rating: Minimum overall hotel rating (default: 3.7)
-        min_location_rating: Minimum location rating (default: 4.0)
-    
-    Returns:
-        Dictionary containing the best travel plan:
-        - flight: Selected flight details (includes outbound AND return flight info)
-        - hotel: Selected hotel details (with rating info)
-        - total_price: Combined flight + hotel price
-        - gap_hours: The timing gap used for filtering
-        - arrival_time: When traveler arrives at destination
-        
-        Returns None if no valid combination is found.
-    
-    Example:
-        >>> flights = await search_flights("LAX", "NRT", "2026-01-15", "2026-01-22")
-        >>> hotels = await search_hotels("Tokyo", "2026-01-15", "2026-01-22")
-        >>> plan = find_cheapest_plan(flights, hotels)
-        >>> if plan:
-        ...     print(f"Best deal: ${plan['total_price']}")
-        ...     print(f"Flight: {plan['flight']['airline']} - ${plan['flight']['price']}")
-        ...     print(f"Hotel: {plan['hotel']['name']} - ${plan['hotel']['price']}")
-    """
-    if gap_hours is None:
-        gap_hours = TRAVEL_HOTEL_CHECKIN_GAP_HOURS
-    
-    logger.info(f"Finding cheapest plan from {len(flights)} flights and {len(hotels)} hotels")
-    
-    if not flights:
-        logger.warning("No flights provided")
+    if not flights or not hotels:
         return None
-    
-    if not hotels:
-        logger.warning("No hotels provided")
+    gap = TRAVEL_HOTEL_CHECKIN_GAP_HOURS if gap_hours is None else gap_hours
+    accommodation = {
+        id(h): assess_accommodation(h, accommodation_type, private_room_required)
+        for h in hotels
+    }
+    eligible_hotels = [h for h in hotels if accommodation[id(h)]["status"] != "contradicted"]
+    if not eligible_hotels:
         return None
-    
-    # STEP 1: Filter hotels by rating requirements first
-    # This ensures we only consider quality accommodations
-    quality_hotels = filter_hotels_by_rating(
-        hotels, 
-        min_overall_rating=min_overall_rating,
-        min_location_rating=min_location_rating
-    )
-    
+    quality = filter_hotels_by_rating(eligible_hotels, min_overall_rating, min_location_rating)
     rating_policy = "standard"
-    if not quality_hotels:
-        logger.warning(
-            f"No hotels meet rating criteria (overall>={min_overall_rating}, "
-            f"location>={min_location_rating}). Relaxing criteria..."
-        )
-        # Fallback: If no hotels meet strict criteria, try with just overall rating
+    if not quality:
         rating_policy = "location_relaxed"
-        quality_hotels = filter_hotels_by_rating(
-            hotels, 
-            min_overall_rating=min_overall_rating,
-            min_location_rating=0  # Remove location rating requirement
-        )
-        
-        if not quality_hotels:
-            # Further fallback: use all hotels with any rating >= 3.0
-            logger.warning("Still no hotels after relaxing criteria. Using all rated hotels.")
-            rating_policy = "overall_relaxed"
-            quality_hotels = [h for h in hotels if (h.get("overall_rating", 0) or h.get("rating", 0) or 0) >= 3.0]
-            
-            if not quality_hotels:
-                rating_policy = "unfiltered"
-                quality_hotels = hotels  # Last resort: use all hotels
-    
-    best_plan = None
-    combinations_checked = 0
-    best_total_price = float('inf')
-    
+        quality = filter_hotels_by_rating(eligible_hotels, min_overall_rating, 0)
+    if not quality:
+        rating_policy = "overall_relaxed"
+        quality = [h for h in eligible_hotels if (h.get("overall_rating", 0) or h.get("rating", 0) or 0) >= 3.0]
+    if not quality:
+        rating_policy, quality = "unfiltered", eligible_hotels
+
+    candidates = []
     for flight in flights:
-        # STEP 2: Get when traveler arrives at destination
-        arrival_datetime = extract_arrival_datetime(flight)
-        
-        if arrival_datetime is None:
-            logger.warning("Skipping flight with unparseable arrival time")
-            continue
-        
-        # STEP 3: Filter remaining hotels by timing constraints
-        valid_hotels = filter_valid_hotels(quality_hotels, arrival_datetime, gap_hours)
-        
-        if not valid_hotels:
-            logger.debug(f"No valid hotels for flight arriving at {arrival_datetime}")
-            continue
-        
-        # STEP 4: Find cheapest valid hotel for this flight
-        for hotel in valid_hotels:
-            combinations_checked += 1
-            flight_price = flight.get("price") or 0
-            hotel_price = hotel.get("total_price", hotel.get("price")) or 0
-            total_price = flight_price + hotel_price
-            
-            if total_price < best_total_price:
-                best_total_price = total_price
-                best_plan = {
-                    "flight": flight,
-                    "hotel": hotel,
-                    "total_price": total_price,
-                    "gap_hours": gap_hours,
-                    "arrival_time": arrival_datetime.strftime("%Y-%m-%d %H:%M"),
-                }
-                logger.debug(
-                    f"New best plan: ${total_price} (flight: ${flight_price}, "
-                    f"hotel: ${hotel_price}, rating: {hotel.get('overall_rating', 'N/A')})"
-                )
-    
-    if best_plan:
-        best_plan["selection"] = {
-            "rating_policy": rating_policy, "combinations_checked": combinations_checked,
+        arrival = extract_arrival_datetime(flight)
+        for hotel in quality:
+            lodging = accommodation[id(hotel)]
+            ci = check_in_date or hotel.get("check_in_date")
+            co = check_out_date or hotel.get("check_out_date")
+            timing = assess_timing(flight, hotel, ci, co, gap)
+            if timing["timing_status"] == "incompatible":
+                continue
+            # Quote may omit dates if legacy callers did not pass them. In that
+            # case use the quote's stay metadata and retain the assessment's
+            # needs-confirmation status if those dates are also absent.
+            flight_price = _valid_quote_price(flight.get("price"))
+            hotel_price = _hotel_stay_price(hotel, ci, co)
+            if flight_price is None or hotel_price is None:
+                continue
+            total = flight_price + hotel_price
+            status_rank = 0 if timing["timing_status"] == "compatible" else 1
+            lodging_rank = 0 if lodging["status"] == "matched" else 1
+            candidates.append((status_rank, lodging_rank, total, flight, hotel, timing, lodging, arrival))
+    if not candidates:
+        return None
+    _, _, total, flight, hotel, timing, lodging, arrival = min(candidates, key=lambda x: (x[0], x[1], x[2]))
+    arrival_text = arrival.strftime("%Y-%m-%d %H:%M") if arrival else ""
+    selected_hotel = dict(hotel)
+    selected_hotel.update({
+        "accommodation_evidence": lodging["evidence"],
+        "accommodation_status": lodging["status"],
+        "accommodation_reasons": lodging["reasons"],
+        "timing_status": timing["timing_status"],
+        "timing_reason_codes": timing["timing_reason_codes"],
+        "timing_message": timing["timing_message"],
+        "arrival_at_hotel": timing["arrival_at_hotel"],
+        "check_in_date": check_in_date or timing["check_in_date"] or hotel.get("check_in_date"),
+        "check_out_date": check_out_date or timing["check_out_date"] or hotel.get("check_out_date"),
+        "provisional": timing["timing_status"] != "compatible" or lodging["status"] == "unknown",
+    })
+    return {
+        "flight": flight, "hotel": selected_hotel, "total_price": total, "gap_hours": gap,
+        "arrival_time": arrival_text,
+        "timing_status": timing["timing_status"],
+        "timing_assessment": timing,
+        "accommodation_status": lodging["status"],
+        "accommodation_assessment": lodging,
+        "provisional": timing["timing_status"] != "compatible" or lodging["status"] == "unknown",
+        "selection": {
+            "rating_policy": rating_policy, "combinations_checked": len(candidates),
             "min_overall_rating": min_overall_rating, "min_location_rating": min_location_rating,
-        }
-        hotel = best_plan['hotel']
-        logger.info(
-            f"Found cheapest plan: ${best_plan['total_price']} total "
-            f"(flight: ${best_plan['flight']['price']}, hotel: ${hotel['price']}, "
-            f"overall_rating: {hotel.get('overall_rating', 'N/A')}, "
-            f"location_rating: {hotel.get('location_rating', 'N/A')})"
-        )
-    else:
-        logger.warning("No valid flight + hotel combination found")
-    
-    return best_plan
+        },
+    }
+
+
+def _valid_quote_price(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return None
+    return amount if amount > 0 and math.isfinite(amount) else None
+
+
+def _hotel_stay_price(hotel, check_in, check_out):
+    """Return a full-stay quote; never treat a nightly rate as the stay total."""
+    if hotel.get("total_price") is not None:
+        return _valid_quote_price(hotel.get("total_price"))
+    nightly = _valid_quote_price(hotel.get("price"))
+    if nightly is None:
+        return None
+    try:
+        nights = (datetime.strptime(str(check_out)[:10], "%Y-%m-%d").date()
+                  - datetime.strptime(str(check_in)[:10], "%Y-%m-%d").date()).days
+    except (TypeError, ValueError):
+        return None
+    return nightly * nights if nights > 0 else None
