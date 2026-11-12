@@ -17,6 +17,8 @@ by searching SerpAPI and applying timing constraints.
 import logging
 import json
 import asyncio
+import hashlib
+import hmac
 from pathlib import Path
 from uuid import UUID
 from asyncio import to_thread
@@ -24,7 +26,7 @@ from asyncio import to_thread
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 import uvicorn
 from agntcy_app_sdk.factory import AgntcyFactory
@@ -37,6 +39,15 @@ from agents.supervisors.travel.conversations import ConversationStore, Conversat
 from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED, TRAVEL_ALLOWED_ORIGINS
 from config.logging_config import setup_logging
 from common.version import get_version_info
+from agents.supervisors.travel.timing import TravelTimingMiddleware
+from agents.supervisors.travel.security import (
+    SecuritySettings,
+    TravelSecurityMiddleware,
+    clear_auth_cookie,
+    is_authenticated,
+    issue_cookie,
+    set_auth_cookie,
+)
 
 # Initialize logging
 setup_logging()
@@ -56,13 +67,19 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# The browser UI sends no cookies and needs only these cross-origin API methods.
+# Authenticated browser calls use the owner cookie; CLI requests use Authorization.
+app.add_middleware(
+    TravelSecurityMiddleware,
+    allowed_origins=TRAVEL_ALLOWED_ORIGINS,
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=TRAVEL_ALLOWED_ORIGINS,
+    allow_origins=list(TRAVEL_ALLOWED_ORIGINS),
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Authorization", "Content-Type"],
+    allow_credentials=True,
 )
+app.add_middleware(TravelTimingMiddleware)
 
 # Initialize the travel graph (LangGraph workflow)
 travel_graph = TravelGraph()
@@ -82,6 +99,47 @@ class PromptRequest(BaseModel):
         if not value.strip():
             raise ValueError("Prompt must be a non-empty string")
         return value.strip()
+
+
+class LoginRequest(BaseModel):
+    access_key: str = Field(min_length=1, max_length=4096)
+
+    model_config = {"extra": "forbid"}
+
+
+@app.post("/auth/login")
+async def login(request: LoginRequest):
+    settings = SecuritySettings()
+    if not settings.enabled:
+        return JSONResponse({"authenticated": True}, headers={"Cache-Control": "no-store"})
+    if not settings.access_key:
+        return JSONResponse({"detail": "Authentication is not configured"}, status_code=503,
+                            headers={"Cache-Control": "no-store"})
+    supplied = hashlib.sha256(request.access_key.encode("utf-8")).digest()
+    expected = hashlib.sha256(settings.access_key.encode("utf-8")).digest()
+    if not hmac.compare_digest(supplied, expected):
+        return JSONResponse({"detail": "Authentication failed"}, status_code=401,
+                            headers={"Cache-Control": "no-store"})
+    response = JSONResponse({"authenticated": True}, headers={"Cache-Control": "no-store"})
+    set_auth_cookie(response, issue_cookie(settings.access_key), settings)
+    return response
+
+
+@app.get("/auth/status")
+async def auth_status(request: Request):
+    settings = SecuritySettings()
+    if not settings.enabled:
+        return JSONResponse({"authenticated": True}, headers={"Cache-Control": "no-store"})
+    authenticated, _ = is_authenticated(request.scope, settings)
+    return JSONResponse({"authenticated": authenticated}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/auth/logout")
+async def logout():
+    settings = SecuritySettings()
+    response = JSONResponse({"authenticated": False}, headers={"Cache-Control": "no-store"})
+    clear_auth_cookie(response, settings)
+    return response
 
 
 @app.get("/.well-known/agent.json")

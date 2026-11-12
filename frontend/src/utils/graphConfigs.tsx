@@ -253,6 +253,7 @@ export const updateTransportLabels = async (
   try {
     const response = await fetch(
       `${getApiUrlForPattern(pattern)}/transport/config`,
+      { credentials: "include" },
     )
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)

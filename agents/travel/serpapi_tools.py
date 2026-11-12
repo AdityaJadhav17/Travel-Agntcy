@@ -13,14 +13,37 @@ Key functions:
 """
 
 import logging
+import asyncio
+import os
+import weakref
 import httpx
 from typing import Optional
 from datetime import datetime
 
 from config.config import SERPAPI_API_KEY, SERPAPI_BASE_URL
 from agents.travel.party import TravelParty
+from common.travel_timing import timed
 
 logger = logging.getLogger("lungo.travel.serpapi_tools")
+
+# Semaphores are scoped to event loops: provider tools may be called from
+# standalone asyncio.run() invocations as well as the long-lived service loop.
+_provider_limits = weakref.WeakKeyDictionary()
+
+
+def _provider_limit() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    limit = _provider_limits.get(loop)
+    if limit is None:
+        try:
+            configured = int(os.getenv("TRAVEL_PROVIDER_CONCURRENCY", "3"))
+        except (TypeError, ValueError):
+            raise ValueError("TRAVEL_PROVIDER_CONCURRENCY must be an integer from 1 to 10") from None
+        if not 1 <= configured <= 10:
+            raise ValueError("TRAVEL_PROVIDER_CONCURRENCY must be an integer from 1 to 10")
+        limit = asyncio.Semaphore(configured)
+        _provider_limits[loop] = limit
+    return limit
 
 
 async def driving_route_from_airport(latitude: float, longitude: float,
@@ -30,7 +53,7 @@ async def driving_route_from_airport(latitude: float, longitude: float,
     if not SERPAPI_API_KEY or not destination_city:
         return None
     try:
-        data = await _request_search({
+        data = await _request_provider({
             "engine": "google_maps_directions", "api_key": SERPAPI_API_KEY,
             "start_coords": f"{latitude},{longitude}",
             "end_addr": ", ".join(part for part in
@@ -70,6 +93,24 @@ async def _request_search(params: dict) -> dict:
     if "error" in data:
         raise RuntimeError("SerpAPI rejected the search. Check the location, dates, API key, and account quota.")
     return data
+
+
+async def _request_provider(params: dict) -> dict:
+    """Apply the per-process provider cap and stage timing around one call."""
+    engine = str(params.get("engine", "provider"))
+    stage = "return_lookup" if params.get("departure_token") else {
+        "google_flights": "outbound_search",
+        "google_hotels": "hotel_search",
+        "google_local": "activity_search",
+    }.get(engine, "provider_search")
+    limit = _provider_limit()
+    async with timed("provider_queue", category="provider"):
+        await limit.acquire()
+    try:
+        async with timed(stage, category="provider"):
+            return await _request_search(params)
+    finally:
+        limit.release()
 
 
 async def search_flights(
@@ -157,7 +198,7 @@ async def search_flights(
     
     try:
         # Make async HTTP request to SerpAPI for outbound flights
-        data = await _request_search(params)
+        data = await _request_provider(params)
         
         # Check for API errors in response
         if "error" in data:
@@ -183,11 +224,25 @@ async def search_flights(
         # Retrieve return legs for the actual selected outbound itinerary.
         # An unrelated one-way search cannot establish a round-trip fare.
         if not is_one_way:
-            for flight in sorted(all_flights, key=lambda item: item["price"])[:3]:
-                token = flight.get("departure_token")
-                if not token:
-                    continue
-                return_data = await _request_search({**params, "departure_token": token})
+            candidates = sorted(all_flights, key=lambda item: item["price"])[:3]
+            candidates_with_tokens = [(flight, flight.get("departure_token")) for flight in candidates]
+            candidates_with_tokens = [(flight, token) for flight, token in candidates_with_tokens if token]
+
+            async def lookup(token):
+                return await _request_provider({**params, "departure_token": token})
+
+            tasks = [asyncio.create_task(lookup(token)) for _, token in candidates_with_tokens]
+            try:
+                # gather preserves input order, so every response remains paired
+                # with the exact outbound itinerary that supplied its token.
+                return_data_items = await asyncio.gather(*tasks)
+            except BaseException:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+            for (flight, _), return_data in zip(candidates_with_tokens, return_data_items):
                 options = return_data.get("best_flights", []) + return_data.get("other_flights", [])
                 options = [parsed for option in options if (parsed := _parse_return_flight(option)) and parsed.get("price", 0) > 0]
                 if options:
@@ -235,7 +290,7 @@ async def _search_return_flights(
     }
     
     try:
-        data = await _request_search(params)
+        data = await _request_provider(params)
         
         if "error" in data:
             logger.warning(f"SerpAPI error for return flights: {data['error']}")
@@ -485,7 +540,7 @@ async def search_hotels(
     
     try:
         # Make async HTTP request to SerpAPI
-        data = await _request_search(params)
+        data = await _request_provider(params)
         
         # Check for API errors in response
         if "error" in data:
@@ -664,7 +719,7 @@ async def search_activities(
     
     try:
         # Make async HTTP request to SerpAPI
-        data = await _request_search(params)
+        data = await _request_provider(params)
         
         # Check for API errors in response
         if "error" in data:

@@ -31,19 +31,17 @@ services:
       dockerfile: docker/Dockerfile.flight-agent
     image: flight-agent:latest
     container_name: flight-agent
-    env_file:
-      - .env
     environment:
       - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
       - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
       - OTLP_HTTP_ENDPOINT=${OTLP_HTTP_ENDPOINT:-http://otel-collector:4318}
       - SERPAPI_API_KEY=${SERPAPI_API_KEY}
+      - SERPAPI_BASE_URL=${SERPAPI_BASE_URL:-https://serpapi.com/search}
+      - TRAVEL_PROVIDER_CONCURRENCY=${TRAVEL_PROVIDER_CONCURRENCY:-3}
       - FLIGHT_AGENT_HOST=0.0.0.0
       - FLIGHT_AGENT_PORT=9001
       - ENABLE_HTTP=true
-    ports:
-      - "127.0.0.1:9001:9001"
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/.well-known/agent.json')"]
       interval: 10s
@@ -64,19 +62,17 @@ services:
       dockerfile: docker/Dockerfile.hotel-agent
     image: hotel-agent:latest
     container_name: hotel-agent
-    env_file:
-      - .env
     environment:
       - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
       - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
       - OTLP_HTTP_ENDPOINT=${OTLP_HTTP_ENDPOINT:-http://otel-collector:4318}
       - SERPAPI_API_KEY=${SERPAPI_API_KEY}
+      - SERPAPI_BASE_URL=${SERPAPI_BASE_URL:-https://serpapi.com/search}
+      - TRAVEL_PROVIDER_CONCURRENCY=${TRAVEL_PROVIDER_CONCURRENCY:-3}
       - HOTEL_AGENT_HOST=0.0.0.0
       - HOTEL_AGENT_PORT=9002
       - ENABLE_HTTP=true
-    ports:
-      - "127.0.0.1:9002:9002"
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9002/.well-known/agent.json')"]
       interval: 10s
@@ -97,19 +93,17 @@ services:
       dockerfile: docker/Dockerfile.activity-agent
     image: activity-agent:latest
     container_name: activity-agent
-    env_file:
-      - .env
     environment:
       - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
       - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
       - OTLP_HTTP_ENDPOINT=${OTLP_HTTP_ENDPOINT:-http://otel-collector:4318}
       - SERPAPI_API_KEY=${SERPAPI_API_KEY}
+      - SERPAPI_BASE_URL=${SERPAPI_BASE_URL:-https://serpapi.com/search}
+      - TRAVEL_PROVIDER_CONCURRENCY=${TRAVEL_PROVIDER_CONCURRENCY:-3}
       - ACTIVITY_AGENT_HOST=0.0.0.0
       - ACTIVITY_AGENT_PORT=9003
       - ENABLE_HTTP=true
-    ports:
-      - "127.0.0.1:9003:9003"
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9003/.well-known/agent.json')"]
       interval: 10s
@@ -137,6 +131,8 @@ services:
     environment:
       # Transport settings (NATS for A2A communication)
       - TRAVEL_CONVERSATION_DB=/data/conversations.sqlite3
+      - TRAVEL_SECURITY_DB=/data/security.sqlite3
+      - TRAVEL_SECURITY_ENABLED=true
       - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
       - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}
@@ -179,11 +175,6 @@ services:
       timeout: 3s
       retries: 10
     container_name: lungo-nats
-    ports:
-      - "127.0.0.1:4222:4222"
-      - "127.0.0.1:4223:4223"
-      - "127.0.0.1:6222:6222"
-      - "127.0.0.1:8222:8222"
 
   # SLIM transport (alternative to NATS, required for group conversations)
   slim:
@@ -208,7 +199,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.ui
       args:
-        VITE_EXCHANGE_APP_API_URL: ${VITE_EXCHANGE_APP_API_URL:-http://127.0.0.1:8000}
+        VITE_EXCHANGE_APP_API_URL: /api
         VITE_GRAFANA_URL: ${VITE_GRAFANA_URL:-http://127.0.0.1:3001}
     image: lungo-ui:latest
     container_name: lungo-ui

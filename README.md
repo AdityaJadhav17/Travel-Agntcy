@@ -79,13 +79,17 @@ in frontend variables, source files, or commits. Existing `.env` values are pres
 From the repository root:
 
 ```sh
+python scripts/setup_local_access.py
 docker compose config --quiet
 docker compose build
 docker compose up -d --wait
 docker compose ps
 ```
 
-Open http://localhost:3000. Only NATS, the three agents, the supervisor and UI
+Open http://localhost:3000 and unlock it with the app key from
+`.runtime/local-access-key.txt` (not your provider key). See
+[local access and abuse protection](docs/local-security.md) for limits and key rotation.
+Only NATS, the three agents, the supervisor and UI
 start by default. Health checks order startup. The UI is built with npm ci/Vite
 and served by nginx; it does not download packages or rebuild on every start.
 
@@ -98,14 +102,15 @@ docker compose up -d --wait
 docker compose down
 ```
 
-The frontend API address is a browser URL, not a Compose service name. Override
-`VITE_EXCHANGE_APP_API_URL` in the root `.env` before building if necessary.
-Published Compose ports bind to `127.0.0.1` for local development. The API allows
+The frontend uses the same-origin `/api` proxy in nginx (or Vite in development).
+Published Compose ports bind to `127.0.0.1`; the search agents and NATS have no
+published host ports in the default setup. The API allows
 browser requests from `http://localhost:3000` and `http://127.0.0.1:3000` by
 default. For another UI origin, set `TRAVEL_ALLOWED_ORIGINS` to a comma-separated
-list of exact origins in the API environment. CORS does not authenticate requests:
-keep this stack private until the API and conversation routes have user
-authentication and ownership checks.
+list of exact origins in the API environment. CORS does not authenticate requests.
+The app uses a single-owner unlock key, cookie authentication and request quotas;
+keep it private. Public multi-user deployment requires a separate security review
+and per-user ownership checks.
 Compose uses `DOCKER_TRANSPORT_SERVER_ENDPOINT` (default `nats://nats:4222`),
 so a native-development `TRANSPORT_SERVER_ENDPOINT=...localhost...` cannot
 accidentally redirect containers to themselves.
@@ -117,7 +122,8 @@ uv sync --locked
 cd frontend
 npm ci
 cd ..
-docker compose up -d nats
+python scripts/setup_local_access.py
+docker compose -f docker-compose.yaml -f compose.host-dev.yaml up -d nats
 ```
 
 Run each Python command in its own terminal **from the repository root**:
@@ -132,6 +138,9 @@ uv run uvicorn agents.supervisors.travel.main:app --host 127.0.0.1 --port 8000 -
 Then run `npm run dev` in `frontend/`. It listens on port 3000. The backend
 loads the root `.env`; native transport defaults to `nats://localhost:4222`.
 Native agent HTTP listeners also default to `127.0.0.1`.
+The host-development override publishes the local NATS broker for native agents;
+use it only on a trusted development machine. Prefer the default Docker stack
+for the protected single-owner app flow.
 No manual PYTHONPATH export is needed with these module commands. Stop existing
 Compose application containers first if their ports are occupied. Stop native
 processes with Ctrl+C and NATS with `docker compose stop nats`.
@@ -143,11 +152,11 @@ processes with Ctrl+C and NATS with `docker compose stop nats`.
 | UI | http://localhost:3000 | Travel chat |
 | Supervisor | http://localhost:8000/docs | OpenAPI documentation |
 | Health | http://localhost:8000/health | Process liveness |
-| Flight agent | http://localhost:9001/.well-known/agent.json | A2A card |
-| Hotel agent | http://localhost:9002/.well-known/agent.json | A2A card |
-| Activity agent | http://localhost:9003/.well-known/agent.json | A2A card |
-| NATS | nats://localhost:4222 | Required A2A transport |
-| NATS health | http://localhost:8222/healthz | Broker health |
+| Flight agent | Internal `flight-agent:9001` | A2A card; localhost:9001 only in native development |
+| Hotel agent | Internal `hotel-agent:9002` | A2A card; localhost:9002 only in native development |
+| Activity agent | Internal `activity-agent:9003` | A2A card; localhost:9003 only in native development |
+| NATS | Internal `nats:4222` | Required A2A transport; host-dev override exposes loopback only |
+| NATS health | Internal `nats:8222/healthz` | Broker health |
 | Grafana | http://localhost:3001 | Optional dashboards |
 | ClickHouse | http://localhost:8123; native port 9000 | Optional trace storage |
 | OTEL collector | ports 4317/4318 | Optional telemetry ingestion |

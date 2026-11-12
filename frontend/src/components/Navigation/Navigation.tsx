@@ -12,11 +12,13 @@ import InfoModal from "./InfoModal"
 interface NavigationProps {
   onToggleSidebar?: () => void
   isSidebarOpen?: boolean
+  onLogout?: () => Promise<void>
 }
 
 const Navigation: React.FC<NavigationProps> = ({
   onToggleSidebar,
   isSidebarOpen = true,
+  onLogout,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false)
   const { isLightMode, toggleTheme } = useTheme()
@@ -68,7 +70,16 @@ const Navigation: React.FC<NavigationProps> = ({
         </div>
 
         {/* Right Actions */}
-        <div className="flex w-[100px] flex-row items-center justify-end gap-1">
+        <div className="flex min-w-[100px] flex-row items-center justify-end gap-1">
+          {onLogout && (
+            <button
+              type="button"
+              onClick={() => void onLogout()}
+              className="rounded-lg bg-white/20 px-2 py-1.5 text-xs font-medium text-gray-800 transition-all hover:bg-white/30 sm:px-3 sm:text-sm"
+            >
+              Sign out
+            </button>
+          )}
           <button
             className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 p-2 transition-all hover:bg-white/30"
             title={`Switch to ${isLightMode ? "dark" : "light"} mode`}

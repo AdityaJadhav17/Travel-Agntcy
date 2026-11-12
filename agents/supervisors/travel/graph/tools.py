@@ -37,6 +37,7 @@ from config.config import (
 )
 from agents.travel.travel_logic import find_cheapest_plan
 from agents.travel.party import TravelParty
+from common.travel_timing import timed
 
 logger = logging.getLogger("lungo.travel.supervisor.tools")
 
@@ -107,7 +108,10 @@ async def _send_a2a_message(agent_card, message: str) -> str:
         
         # Send message and get response
         logger.info(f"Sending A2A message to {agent_card.name}...")
-        response = await client.send_message(request)
+        agent_name = str(getattr(agent_card, "name", "unknown")).lower()
+        category = "flight" if "flight" in agent_name else "hotel" if "hotel" in agent_name else "activity"
+        async with timed("a2a_round_trip", category=category):
+            response = await client.send_message(request)
         logger.info("Response received from A2A agent %s", agent_card.name)
         
         # Parse response (matching the exact pattern from original code)

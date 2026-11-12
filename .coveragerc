@@ -9,6 +9,7 @@ source =
 [report]
 include =
     */conversations.py
+    */security.py
     */graph/budgets.py
     */graph/recommendations.py
     */graph/partial_searches.py

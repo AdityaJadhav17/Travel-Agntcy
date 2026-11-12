@@ -3,7 +3,7 @@ WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ .
-ARG VITE_EXCHANGE_APP_API_URL=http://127.0.0.1:8000
+ARG VITE_EXCHANGE_APP_API_URL=/api
 ARG VITE_GRAFANA_URL=http://127.0.0.1:3001
 RUN npm run typecheck && npm run build
 

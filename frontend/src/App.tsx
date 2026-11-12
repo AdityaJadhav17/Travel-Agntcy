@@ -33,6 +33,7 @@ import {
   idleView,
   type ChatHistoryItem,
 } from "@/stores/chatDisplay"
+import AuthGate from "@/components/AuthGate"
 
 export type { ChatHistoryItem } from "@/stores/chatDisplay"
 const CHAT_HISTORY_KEY = "travel_chat_history"
@@ -43,7 +44,9 @@ async function persistBrowserState(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value))
 }
 
-const App: React.FC = () => {
+const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
+  onLogout,
+}) => {
   const { streamMessage, cancelStream, deleteConversation } = useAgentAPI()
   const activeChatRef = useRef<string | null>(null)
   const requests = useRef(new ChatRequests())
@@ -258,6 +261,7 @@ const App: React.FC = () => {
         <Navigation
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={isSidebarOpen}
+          onLogout={onLogout}
         />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar
@@ -536,5 +540,9 @@ const App: React.FC = () => {
     </ThemeProvider>
   )
 }
+
+const App: React.FC = () => (
+  <AuthGate>{(logout) => <TravelApp onLogout={logout} />}</AuthGate>
+)
 
 export default App
