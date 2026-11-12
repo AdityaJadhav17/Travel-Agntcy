@@ -14,6 +14,7 @@ The travel agent helps users find the cheapest flight + hotel combinations
 by searching SerpAPI and applying timing constraints.
 """
 
+from contextlib import asynccontextmanager
 import logging
 import json
 import asyncio
@@ -40,6 +41,7 @@ from config.config import DEFAULT_MESSAGE_TRANSPORT, TRACING_ENABLED, TRAVEL_ALL
 from config.logging_config import setup_logging
 from common.version import get_version_info
 from agents.supervisors.travel.timing import TravelTimingMiddleware
+from agents.travel.provider_http import provider_http_lifespan
 from agents.supervisors.travel.security import (
     SecuritySettings,
     TravelSecurityMiddleware,
@@ -60,8 +62,16 @@ load_dotenv()
 # This enables observability for all agent operations
 shared.set_factory(AgntcyFactory("lungo.travel_supervisor", enable_tracing=TRACING_ENABLED))
 
+@asynccontextmanager
+async def lifespan(app):
+    # Uvicorn drains requests before exiting this lifespan.
+    async with provider_http_lifespan():
+        yield
+
+
 # Create FastAPI application
 app = FastAPI(
+    lifespan=lifespan,
     title="Travel Planning Agent",
     description="AI agent that finds the cheapest flight + hotel combinations for trips",
     version="1.0.0",

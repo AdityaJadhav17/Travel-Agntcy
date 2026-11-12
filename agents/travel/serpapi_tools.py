@@ -14,7 +14,6 @@ Key functions:
 
 import logging
 import asyncio
-import os
 import weakref
 import httpx
 from typing import Optional
@@ -23,6 +22,7 @@ from datetime import datetime
 from config.config import SERPAPI_API_KEY, SERPAPI_BASE_URL
 from agents.travel.party import TravelParty
 from common.travel_timing import timed
+from agents.travel.provider_http import provider_concurrency_limit, provider_http_client
 
 logger = logging.getLogger("lungo.travel.serpapi_tools")
 
@@ -35,13 +35,7 @@ def _provider_limit() -> asyncio.Semaphore:
     loop = asyncio.get_running_loop()
     limit = _provider_limits.get(loop)
     if limit is None:
-        try:
-            configured = int(os.getenv("TRAVEL_PROVIDER_CONCURRENCY", "3"))
-        except (TypeError, ValueError):
-            raise ValueError("TRAVEL_PROVIDER_CONCURRENCY must be an integer from 1 to 10") from None
-        if not 1 <= configured <= 10:
-            raise ValueError("TRAVEL_PROVIDER_CONCURRENCY must be an integer from 1 to 10")
-        limit = asyncio.Semaphore(configured)
+        limit = asyncio.Semaphore(provider_concurrency_limit())
         _provider_limits[loop] = limit
     return limit
 
@@ -82,7 +76,7 @@ async def driving_route_from_airport(latitude: float, longitude: float,
 async def _request_search(params: dict) -> dict:
     """Never include an authenticated request URL in errors or logs."""
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with provider_http_client() as client:
             response = await client.get(SERPAPI_BASE_URL, params=params)
             response.raise_for_status()
             data = response.json()

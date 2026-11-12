@@ -2,8 +2,9 @@
 
 Status: implementation started on 2026-11-12 after adding local-owner security.
 Initial stage timing and bounded return-flight concurrency are implemented.
-Connection pooling, flight/hotel overlap and combined model decisions remain
-planned. No paid requests were made for this implementation's validation.
+Connection pooling is also implemented and validated (see Phase 3 execution
+record below). Flight/hotel overlap and combined model decisions remain planned.
+No paid requests were made for this implementation's validation.
 
 ## Objective
 
@@ -364,3 +365,55 @@ Remaining measurement work includes browser card-render timing, distributed
 correlation, persistence/lock timing and a live baseline. HTTP client pooling,
 parallel flight/hotel search and combined model decisions remain deferred to
 their validation gates above; they are not implemented by this initial change.
+
+## Phase 3 execution record — 2026-11-12
+
+The flight, hotel and activity services now own an event-loop-local HTTPX client
+across their HTTP and NATS lifetimes. The supervisor owns its client through its
+FastAPI lifespan for direct directions calls. Standalone helper calls retain a
+scoped client fallback; unrelated event loops never share a client. Nested owners
+share the client and the final owner closes it. Shutdown waits for serving-task
+cleanup before closing the pool, including NATS-only mode.
+
+Connection and keepalive limits match `TRAVEL_PROVIDER_CONCURRENCY` (default 3,
+valid range 1–10). Connect, read, write and pool timeouts remain 60 seconds. No
+retries, new provider calls, shared default credentials or query parameters were
+added. Response cookies are rejected so they cannot affect later searches.
+Existing request admission and security controls remain enabled.
+
+The implementation follows [HTTPX scoped-client guidance](https://www.python-httpx.org/async/)
+and [connection-limit configuration](https://www.python-httpx.org/advanced/resource-limits/).
+
+Validation:
+
+- Docker backend: **235 tests passed**, including request isolation, response
+  cookie rejection, separate event loops, nested ownership, cancellation during
+  shutdown, HTTP/NATS lifecycle and supervisor lifespan tests.
+- Configured branch-inclusive coverage: **92.77%**; new provider client module
+  98%, service lifecycle module 95%. Python lint and diff whitespace checks pass.
+- Real fixture HTTP/NATS stack: restart persistence passed; **10/10** conversation
+  evaluations passed with zero failed checks. No paid model/provider calls.
+- Frontend code was unchanged; the browser suite was not rerun for this phase.
+- Updated local containers are healthy and the deployed no-paid security probe
+  passed. Recreating the supervisor changed its container address; restarting
+  the UI refreshed nginx's cached upstream address and resolved a transient 502.
+  When recreating the backend independently, restart the UI proxy afterward.
+
+Run `python scripts/benchmark_provider_pool.py` for a local HTTP/1.1 experiment.
+The measured run used 20 independent lifespans per mode, five calls each:
+
+| Mode | Requests | TCP connections | Repeated-call median | Repeated-call p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Per-call fallback | 100 | 100 | 3.766 ms | 4.728 ms |
+| Pooled | 100 | 20 | 0.406 ms | 0.758 ms |
+
+All five requests within each pooled lifespan reused one connection. Cold-call
+medians were 3.868 ms fallback and 3.785 ms pooled. Cold pooling measurements
+include client construction; fallback measurements include each call's client
+construction and closure. These localhost measurements prove reuse and reduced
+local overhead, not a live end-to-end speedup. Real TLS, provider latency and
+model time are absent. A paid live comparison remains unperformed.
+
+Next: collect a bounded live baseline before choosing the next optimization;
+flight/hotel overlap and combined model decisions remain subject to the gates
+above. Pooling can be rolled back independently without changing security.
