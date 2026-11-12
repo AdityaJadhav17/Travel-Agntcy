@@ -57,6 +57,11 @@ class Recommendation(BaseModel):
     combinations_checked: int = Field(ge=1)
     min_overall_rating: float
     min_location_rating: float
+    timing_status: Literal["compatible", "needs_confirmation"] = "needs_confirmation"
+    timing_reason_codes: list[str] = Field(default_factory=list, max_length=12)
+    timing_message: str = Field(default="", max_length=400)
+    accommodation_status: Literal["matched", "unknown"] = "unknown"
+    accommodation_reasons: list[str] = Field(default_factory=list, max_length=12)
 
 
 class FlightRecommendation(BaseModel):
@@ -91,6 +96,24 @@ def quote_facts(quote, kind, trip):
             )
         }),
     }
+    # Keep legacy quote IDs stable. Explicit stay-date changes affect a hotel
+    # quote identity; lodging preferences and flight quote IDs do not.
+    if kind == "hotel":
+        # Legacy hotel quotes already used flight trip dates in the identity.
+        # Only add a date component when the explicit stay changes those dates,
+        # so an explicit stay equal to the defaults preserves the old ID.
+        default_in = getattr(trip, "start_date", None)
+        default_out = getattr(trip, "end_date", None)
+        hotel_dates = {
+            key: value for key, value in (
+                ("check_in", getattr(trip, "hotel_check_in_date", None)
+                 if getattr(trip, "hotel_check_in_date", None) != default_in else None),
+                ("check_out", getattr(trip, "hotel_check_out_date", None)
+                 if getattr(trip, "hotel_check_out_date", None) != default_out else None),
+            ) if value
+        }
+        if hotel_dates:
+            identity["explicit_hotel_dates"] = hotel_dates
     identity["return_flight"] = {key: (quote.get("return_flight") or {}).get(key) for key in (
         "airline", "departure_code", "arrival_code", "departure_time", "arrival_time", "stops",
     )}
@@ -117,6 +140,11 @@ def capture_recommendation(plan, trip):
         flight_itinerary=FlightItinerary.model_validate(itinerary),
         hotel=quote_facts(plan["hotel"], "hotel", trip),
         arrival_time=clean_text(plan["arrival_time"]),
+        timing_status=plan.get("timing_status", "needs_confirmation"),
+        timing_reason_codes=(plan.get("timing_assessment") or {}).get("timing_reason_codes", [])[:12],
+        timing_message=clean_text((plan.get("timing_assessment") or {}).get("timing_message", ""))[:400],
+        accommodation_status=plan.get("accommodation_status", "unknown"),
+        accommodation_reasons=(plan.get("accommodation_assessment") or {}).get("reasons", [])[:12],
         **plan["selection"],
     ).model_dump(mode="json")
 
@@ -196,7 +224,8 @@ def explain_recommendation(saved):
     lines = [
         "**Why this trip?**",
         f"Based on your saved search from {stamp}.",
-        f"Route: {clean_text(trip.origin)} to {clean_text(trip.destination)}; {clean_text(trip.start_date)} to {clean_text(trip.end_date)}.",
+        f"Route: {clean_text(trip.origin)} to {clean_text(trip.destination)}; flight dates {clean_text(trip.start_date)} to {clean_text(trip.end_date)}.",
+        f"Hotel stay dates: {clean_text(getattr(trip, 'hotel_check_in_date', None) or trip.start_date)} to {clean_text(getattr(trip, 'hotel_check_out_date', None) or trip.end_date)}.",
         trip.label("full_trip"),
         f"- Flight: {rec.flight.name}.",
         f"- Hotel: {rec.hotel.name}.",
@@ -206,7 +235,10 @@ def explain_recommendation(saved):
         # Reuse Decimal-based price rules rather than model arithmetic.
         total = money(flight) + money(hotel)
         lines.append(f"- Saved price: USD {flight:.2f} flight fare + USD {hotel:.2f} full hotel stay = USD {total:.2f}.")
-        lines.append(f"- Selection: lowest combined price among {rec.combinations_checked} eligible returned combinations; this is not a guarantee of the cheapest trip everywhere.")
+        if rec.timing_status == "compatible" and rec.accommodation_status == "matched":
+            lines.append(f"- Selection: lowest combined price among {rec.combinations_checked} eligible returned combinations; this is not a guarantee of the cheapest trip everywhere.")
+        else:
+            lines.append(f"- Selection: lowest quoted total among {rec.combinations_checked} non-contradicted combinations; suitability remains provisional because some timing or lodging evidence is unverified.")
         if trip.budget_amount is not None:
             lines.append("- At the time of search: " + assessment(trip, total)["message"])
     else:
@@ -219,8 +251,27 @@ def explain_recommendation(saved):
     }
     lines.extend([
         "- Rating rule: " + policies[rec.rating_policy],
-        f"- Timing: the selected flight arrives at {rec.arrival_time} and the pair passed the app's check-in compatibility rules. Actual check-in arrangements are not confirmed.",
+        (f"- Timing: {clean_text(rec.timing_message)}" if rec.timing_message else f"- Timing: the selected flight arrives at {rec.arrival_time}; timing needs confirmation because the saved quote predates this assessment."),
+        (f"- Accommodation: {_accommodation_summary(rec.accommodation_status, rec.accommodation_reasons)}"),
         "Activities, meals, transfers and unquoted fees are excluded from the flight + hotel total.",
         "This explains a saved quote; prices and availability have not been refreshed. Ask me to search again for current quotes.",
     ])
     return "\n\n".join(lines)
+
+
+def _accommodation_summary(status, reasons):
+    explanations = {
+        "room_privacy_unverified": "the provider did not specify whether the room is private",
+        "property_type_unverified": "the provider did not specify the property category",
+        "hotel_property_evidence": "the provider categorized the property as a hotel",
+        "hostel_property_evidence": "the provider categorized the property as a hostel",
+        "listing_name_suggests_hostel": "the listing name suggests a hostel",
+        "private_room_evidence": "the provider identified a private room",
+        "shared_room_evidence": "the provider identified a shared or dormitory room",
+        "private_room_not_required": "a private room was not required",
+    }
+    details = [explanations[reason] for reason in reasons if reason in explanations]
+    prefix = {"matched": "Requirements matched the available evidence.",
+              "unknown": "Some lodging requirements remain unverified.",
+              "contradicted": "The quote contradicted a lodging requirement."}.get(status, "Lodging evidence is unavailable.")
+    return prefix + (" " + "; ".join(details) + "." if details else "")

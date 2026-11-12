@@ -72,4 +72,9 @@ def search(request: Request):
             "rate_per_night": {"extracted_lowest": nightly + 25},
             "total_rate": {"extracted_lowest": nights * (nightly + 25)},
         }]}
+    if "count city" in params.get("q", "").lower():
+        return {"local_results": [
+            {"title": f"Count City Activity {index}", "rating": 4.8 - index / 10, "reviews": 100 + index, "type": "Museum"}
+            for index in range(1, 6)
+        ]}
     return {"local_results": [{"title": "Fixture City Museum", "rating": 4.8, "reviews": 123, "type": "Museum"}]}

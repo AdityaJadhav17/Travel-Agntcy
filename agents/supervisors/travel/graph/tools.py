@@ -459,7 +459,9 @@ async def find_best_travel_plan(
             return f"No hotels found in {hotel_location}. The Hotel Agent may be unavailable."
         
         # Find cheapest valid combination
-        plan = find_cheapest_plan(flights, hotels)
+        plan = find_cheapest_plan(
+            flights, hotels, check_in_date=start_date, check_out_date=end_date,
+        )
         
         if not plan:
             return (
@@ -488,7 +490,7 @@ async def find_best_travel_plan(
 - Hotel: {hotel.get('name', 'Unknown Hotel')}
 - Price: ${hotel.get('price', 0):.2f}
 - Rating: {hotel.get('rating', 'N/A')}/5
-- Check-in Time: {hotel.get('check_in_time', '15:00')}
+- Check-in Time: {hotel.get('check_in_time') or 'Not supplied by provider'}
 
 📋 **Trip Summary:**
 - Route: {origin} → {destination}
@@ -496,6 +498,8 @@ async def find_best_travel_plan(
 - Arrival at destination: {plan.get('arrival_time', 'N/A')}
 - Buffer time to hotel: {plan.get('gap_hours', TRAVEL_HOTEL_CHECKIN_GAP_HOURS)} hours
 """
+        if plan.get("provisional"):
+            result += "\n\n**Timing / lodging needs confirmation:** " + (plan.get("timing_assessment") or {}).get("timing_message", "Some accommodation requirements are unverified.")
         return result.strip()
         
     except Exception as e:

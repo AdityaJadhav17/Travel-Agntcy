@@ -11,6 +11,42 @@ const usd = (value: number | null) =>
 const stops = (count: number) =>
   count === 0 ? "Nonstop" : `${count} stop${count === 1 ? "" : "s"}`
 
+const accommodationReasonLabels: Record<string, string> = {
+  known_hostel_excluded:
+    "The listing indicates a hostel, which does not match your hotel preference.",
+  known_hotel_excluded:
+    "The listing indicates a hotel, which does not match your hostel preference.",
+  known_nonhotel_property_type:
+    "The provider identified a non-hotel property type.",
+  known_nonhostel_property_type:
+    "The provider identified a non-hostel property type.",
+  hotel_property_evidence: "The provider identifies this property as a hotel.",
+  hostel_property_evidence:
+    "The provider identifies this property as a hostel.",
+  listing_name_suggests_hostel:
+    "The listing name suggests this may be a hostel.",
+  property_type_unverified: "The provider did not confirm the property type.",
+  room_privacy_unverified:
+    "The provider did not confirm whether the room is private.",
+  non_private_room_evidence:
+    "The provider indicates this is not a private room.",
+  shared_room_evidence:
+    "The provider indicates this is a shared or dormitory room.",
+  private_room_evidence: "The provider identifies this as a private room.",
+  private_room_not_required: "A private room was not required.",
+}
+
+const humanizeEvidenceSource = (source: string) => {
+  if (
+    source.toLowerCase() === "serpapi_google_hotels" ||
+    source.toLowerCase() === "serpapigooglehotels"
+  )
+    return "SerpAPI Google Hotels"
+  return source
+    .replace(/[_./:-]+/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+}
+
 export default function StructuredTravelResultCard({
   result,
 }: {
@@ -183,6 +219,71 @@ export default function StructuredTravelResultCard({
                 {hotel.location_rating !== null &&
                   `Location ${hotel.location_rating}/5`}
               </p>
+              {(hotel.check_in_date ||
+                hotel.check_out_date ||
+                result.hotel_check_in_date ||
+                result.hotel_check_out_date) && (
+                <p className="text-sm text-gray-300">
+                  Stay:{" "}
+                  {hotel.check_in_date ??
+                    result.hotel_check_in_date ??
+                    result.start_date}
+                  {" to "}
+                  {hotel.check_out_date ??
+                    result.hotel_check_out_date ??
+                    result.end_date}
+                </p>
+              )}
+              <p className="text-sm text-amber-200">
+                {hotel.accommodation_status === "matched"
+                  ? "Accommodation preference matched"
+                  : hotel.accommodation_status === "contradicted"
+                    ? "Does not meet the accommodation preference"
+                    : "Accommodation type or room details unverified"}
+                {(hotel.property_type || hotel.room_type) && (
+                  <>
+                    {" "}
+                    ·{" "}
+                    {[hotel.property_type, hotel.room_type]
+                      .filter(Boolean)
+                      .join(" / ")}
+                  </>
+                )}
+                {hotel.accommodation_evidence_source && (
+                  <>
+                    {" "}
+                    · Evidence:{" "}
+                    {humanizeEvidenceSource(
+                      hotel.accommodation_evidence_source,
+                    )}
+                  </>
+                )}
+              </p>
+              {hotel.accommodation_reasons?.length ? (
+                <p className="mt-1 text-xs text-gray-400">
+                  {hotel.accommodation_reasons
+                    .map(
+                      (reason) =>
+                        accommodationReasonLabels[reason] ??
+                        "Confirm accommodation details with the property.",
+                    )
+                    .filter(Boolean)
+                    .join(" ")}
+                </p>
+              ) : null}
+              {(hotel.timing_message || hotel.timing_status) && (
+                <p
+                  className={`mt-1 text-sm ${hotel.provisional ? "text-amber-200" : "text-gray-300"}`}
+                >
+                  {hotel.provisional && "Provisional: "}
+                  {hotel.timing_message ||
+                    (hotel.timing_status === "needs_confirmation"
+                      ? "Arrival timing needs confirmation."
+                      : hotel.timing_status === "incompatible"
+                        ? "Arrival timing is incompatible with these stay dates."
+                        : "Arrival timing is compatible with these stay dates.")}
+                </p>
+              )}
             </article>
           ))}
         </div>

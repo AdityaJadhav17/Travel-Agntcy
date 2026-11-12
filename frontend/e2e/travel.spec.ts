@@ -20,7 +20,18 @@ async function send(page: Page, prompt: string) {
   await page.getByRole("textbox").press("Enter")
   const result = await response
   expect(result.status()).toBe(200)
-  return observedStreamResult(page, result)
+  const finalResult = await observedStreamResult(page, result)
+  const requestId = result.request().postDataJSON().request_id
+  const events = await page.evaluate((id) => {
+    const target = window as typeof window & {
+      travelStreamBytes: Record<string, string>
+    }
+    return (target.travelStreamBytes[id] || "")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line))
+  }, requestId)
+  return { ...finalResult, _events: events }
 }
 
 test("structured cards survive rewritten narrative and reload", async ({
@@ -75,6 +86,184 @@ test("structured cards survive rewritten narrative and reload", async ({
   await page.reload()
   await page.getByRole("button", { name: "Plan Dallas to New York" }).click()
   await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
+})
+
+test("renders requested counts, accommodation evidence and provisional timing labels", async ({
+  page,
+}) => {
+  await page.route("**/agent/prompt/stream", async (route) => {
+    const response = await route.fetch()
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    const body = events.map((event) => {
+      if (event.type !== "done" || !event.result.travel_result) return event
+      const result = event.result.travel_result
+      const hotel = result.hotels[0]
+      if (hotel) {
+        hotel.property_type = "hotel"
+        hotel.room_type = "private room"
+        hotel.accommodation_evidence_source = "serpapi_google_hotels"
+        hotel.accommodation_status = "matched"
+        hotel.accommodation_reasons = [
+          "private_room_evidence",
+          "room_privacy_unverified",
+        ]
+        hotel.check_in_date = start
+        hotel.check_out_date = end
+        hotel.timing_status = "needs_confirmation"
+        hotel.timing_message = "Late arrival retention needs confirmation."
+        hotel.arrival_at_hotel = `${start} 00:30`
+        hotel.provisional = true
+      }
+      result.hotel_check_in_date = start
+      result.hotel_check_out_date = end
+      result.activity_result_count = 3
+      result.activities = [1, 2, 3].map((number) => ({
+        id: `fixture-activity-${number}`,
+        name: `Fixture Activity ${number}`,
+        type: "Museum",
+        rating: null,
+      }))
+      return { ...event, result: { ...event.result, travel_result: result } }
+    })
+    await route.fulfill({
+      response,
+      body: body.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    })
+  })
+  await page.goto("/")
+  await send(page, "Plan Dallas to New York")
+  await send(page, `${start} to ${end}`)
+  const cards = page.getByRole("region", { name: "Travel results" })
+  await expect(cards.getByText("Fixture Activity 1")).toBeVisible()
+  await expect(cards.getByText("Fixture Activity 3")).toBeVisible()
+  await expect(cards.getByText("Fixture Activity 4")).toHaveCount(0)
+  await expect(
+    cards.getByText("Accommodation preference matched"),
+  ).toBeVisible()
+  await expect(cards.getByText(/hotel \/ private room/)).toBeVisible()
+  await expect(cards.getByText(/Evidence: SerpAPI Google Hotels/)).toBeVisible()
+  await expect(
+    cards.getByText(/The provider identifies this as a private room\./),
+  ).toBeVisible()
+  await expect(cards.getByText(/private_room_evidence/)).toHaveCount(0)
+  await expect(
+    cards.getByText(/Provisional: Late arrival retention needs confirmation/),
+  ).toBeVisible()
+  await expect(cards.getByText(`Stay: ${start} to ${end}`)).toBeVisible()
+})
+
+test("legacy hotel cards render unknown accommodation without privacy claims", async ({
+  page,
+}) => {
+  await page.route("**/agent/prompt/stream", async (route) => {
+    const response = await route.fetch()
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    const body = events.map((event) => {
+      if (event.type !== "done" || !event.result.travel_result) return event
+      const result = event.result.travel_result
+      delete result.hotel_check_in_date
+      delete result.hotel_check_out_date
+      for (const hotel of result.hotels) {
+        for (const key of [
+          "property_type",
+          "room_type",
+          "accommodation_evidence_source",
+          "accommodation_status",
+          "accommodation_reasons",
+          "accommodation_evidence",
+          "check_in_date",
+          "check_out_date",
+          "timing_status",
+          "timing_reason_codes",
+          "timing_message",
+          "arrival_at_hotel",
+          "provisional",
+        ])
+          delete hotel[key]
+      }
+      return event
+    })
+    await route.fulfill({
+      response,
+      body: body.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    })
+  })
+  await page.goto("/")
+  await send(page, "Plan Dallas to New York")
+  await send(page, `${start} to ${end}`)
+  const cards = page.getByRole("region", { name: "Travel results" })
+  await expect(
+    cards.getByText("Accommodation type or room details unverified"),
+  ).toBeVisible()
+  await expect(cards.getByText(/private room/i)).toHaveCount(0)
+})
+
+test("three requested activities match the response and persisted cards", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const result = await send(page, "Find three things to do in Count City")
+  expect(result.trip_state).toMatchObject({
+    search_type: "activity_only",
+    activity_result_count: 3,
+  })
+  expect(
+    result.travel_result.activities.map(
+      (activity: { name: string }) => activity.name,
+    ),
+  ).toEqual([
+    "Count City Activity 1",
+    "Count City Activity 2",
+    "Count City Activity 3",
+  ])
+  for (let index = 1; index <= 3; index++)
+    expect(result.response).toContain(`Count City Activity ${index}`)
+  expect(result.response).not.toContain("Count City Activity 4")
+  const cards = page.getByRole("region", { name: "Travel results" })
+  for (let index = 1; index <= 3; index++)
+    await expect(cards.getByText(`Count City Activity ${index}`)).toBeVisible()
+  await expect(cards.getByText("Count City Activity 4")).toHaveCount(0)
+  await page.reload()
+  await page
+    .getByRole("button", {
+      name: /^Find three things to do/,
+    })
+    .click()
+  await expect(
+    page
+      .getByRole("region", { name: "Travel results" })
+      .getByText("Count City Activity 3"),
+  ).toBeVisible()
+  await expect(
+    page
+      .getByRole("region", { name: "Travel results" })
+      .getByText("Count City Activity 4"),
+  ).toHaveCount(0)
+})
+
+test("flights and hotels only never call or display activities", async ({
+  page,
+}) => {
+  await page.goto("/")
+  await send(page, "Plan Dallas to New York flights and hotels only")
+  const result = await send(page, `${start} to ${end}`)
+  expect(result.trip_state).toMatchObject({
+    search_type: "full_trip",
+    include_activities: false,
+  })
+  expect(result.travel_result.activities).toEqual([])
+  expect(result.response).not.toContain("Fixture City Museum")
+  expect(
+    result._events.some(
+      (event: { component?: string }) => event.component === "activities",
+    ),
+  ).toBe(false)
 })
 
 test("unknown result versions fall back to the narrative", async ({ page }) => {

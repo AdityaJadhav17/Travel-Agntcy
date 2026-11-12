@@ -42,6 +42,8 @@ async def extract(context):
     for city, code in (("new york", "JFK"), ("boston", "BOS"), ("tokyo", "NRT")):
         if city in prompt:
             params.update(destination=code, destination_city=city.title(), location=city.title())
+    if "count city" in prompt:
+        params.update(destination_city="Count City", location="Count City")
     if "san luis obispo" in prompt or re.search(r"\bsbp\b", prompt):
         params.update(destination="SBP", destination_city="San Luis Obispo", location="San Luis Obispo")
     if marker := re.search(r"transient hotel ([a-f0-9-]+)", prompt):

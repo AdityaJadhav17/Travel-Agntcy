@@ -20,6 +20,23 @@ export interface HotelCard {
   total_usd: number | null
   overall_rating: number | null
   location_rating: number | null
+  property_type?: string | null
+  room_type?: string | null
+  accommodation_evidence_source?: string | null
+  accommodation_status?: "matched" | "contradicted" | "unknown"
+  accommodation_reasons?: string[]
+  accommodation_evidence?: {
+    property_type: string | null
+    room_type: string | null
+    source: string | null
+  } | null
+  check_in_date?: string | null
+  check_out_date?: string | null
+  timing_status?: "compatible" | "incompatible" | "needs_confirmation" | null
+  timing_reason_codes?: string[]
+  timing_message?: string
+  arrival_at_hotel?: string | null
+  provisional?: boolean
 }
 
 export interface ActivityCard {
@@ -63,6 +80,11 @@ export interface TravelResult {
   destination: string
   start_date: string
   end_date: string
+  hotel_check_in_date?: string | null
+  hotel_check_out_date?: string | null
+  flight_result_count?: number | null
+  hotel_result_count?: number | null
+  activity_result_count?: number | null
   adults: number
   children: number
   rooms: number
@@ -86,6 +108,14 @@ const text = (value: unknown): value is string => typeof value === "string"
 
 const count = (value: unknown): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= 0
+
+const requestedCount = (value: unknown): value is number | null | undefined =>
+  value === undefined ||
+  value === null ||
+  (typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 100)
 
 const price = (value: unknown): value is number | null =>
   value === null ||
@@ -125,7 +155,55 @@ const hotel = (value: unknown): value is HotelCard => {
     price(value.nightly_usd) &&
     price(value.total_usd) &&
     rating(value.overall_rating) &&
-    rating(value.location_rating)
+    rating(value.location_rating) &&
+    (value.property_type === undefined ||
+      value.property_type === null ||
+      text(value.property_type)) &&
+    (value.room_type === undefined ||
+      value.room_type === null ||
+      text(value.room_type)) &&
+    (value.accommodation_evidence_source === undefined ||
+      value.accommodation_evidence_source === null ||
+      text(value.accommodation_evidence_source)) &&
+    (value.accommodation_status === undefined ||
+      value.accommodation_status === "matched" ||
+      value.accommodation_status === "contradicted" ||
+      value.accommodation_status === "unknown") &&
+    (value.accommodation_reasons === undefined ||
+      (Array.isArray(value.accommodation_reasons) &&
+        value.accommodation_reasons.length <= 5 &&
+        value.accommodation_reasons.every(text))) &&
+    (value.accommodation_evidence === undefined ||
+      value.accommodation_evidence === null ||
+      (record(value.accommodation_evidence) &&
+        (value.accommodation_evidence.property_type === null ||
+          text(value.accommodation_evidence.property_type)) &&
+        (value.accommodation_evidence.room_type === null ||
+          text(value.accommodation_evidence.room_type)) &&
+        (value.accommodation_evidence.source === null ||
+          text(value.accommodation_evidence.source)))) &&
+    (value.check_in_date === undefined ||
+      value.check_in_date === null ||
+      (text(value.check_in_date) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(value.check_in_date))) &&
+    (value.check_out_date === undefined ||
+      value.check_out_date === null ||
+      (text(value.check_out_date) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(value.check_out_date))) &&
+    (value.timing_status === undefined ||
+      value.timing_status === null ||
+      value.timing_status === "compatible" ||
+      value.timing_status === "incompatible" ||
+      value.timing_status === "needs_confirmation") &&
+    (value.timing_reason_codes === undefined ||
+      (Array.isArray(value.timing_reason_codes) &&
+        value.timing_reason_codes.length <= 8 &&
+        value.timing_reason_codes.every(text))) &&
+    (value.timing_message === undefined || text(value.timing_message)) &&
+    (value.arrival_at_hotel === undefined ||
+      value.arrival_at_hotel === null ||
+      text(value.arrival_at_hotel)) &&
+    (value.provisional === undefined || typeof value.provisional === "boolean")
   )
 }
 
@@ -204,7 +282,22 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     value.rooms < 1 ||
     typeof value.is_one_way !== "boolean" ||
     !price(value.total_usd) ||
-    !text(value.notice)
+    !text(value.notice) ||
+    !requestedCount(value.flight_result_count) ||
+    !requestedCount(value.hotel_result_count) ||
+    !requestedCount(value.activity_result_count) ||
+    !(
+      value.hotel_check_in_date === undefined ||
+      value.hotel_check_in_date === null ||
+      (text(value.hotel_check_in_date) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(value.hotel_check_in_date))
+    ) ||
+    !(
+      value.hotel_check_out_date === undefined ||
+      value.hotel_check_out_date === null ||
+      (text(value.hotel_check_out_date) &&
+        /^\d{4}-\d{2}-\d{2}$/.test(value.hotel_check_out_date))
+    )
   )
     return null
   if (

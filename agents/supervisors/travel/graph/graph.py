@@ -37,10 +37,12 @@ from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
 from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, capture_flight_recommendation, explain_recommendation, quote_facts
 from agents.supervisors.travel.graph.travel_results import travel_result, airport_comparison_result, date_comparison_result
+from agents.supervisors.travel.graph.presentation_selection import select_for_presentation, explicit_requested_count
 from agents.supervisors.travel.graph.nearby_airports import airport_catalog, nearby_arrivals, NearbyAirport
 from agents.supervisors.travel.graph.partial_searches import PartialSearch, retain_flights
 from agents.supervisors.travel.graph.progress import emit
 from agents.travel.serpapi_tools import driving_route_from_airport
+from agents.travel.lodging import assess_accommodation
 from common.llm import get_llm
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
 
@@ -482,28 +484,36 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     )
 
             hotel_location = params.destination_city or params.destination
-            hotels = await get_hotels_via_a2a(hotel_location, params.start_date, params.end_date, party=params)
+            hotels = await get_hotels_via_a2a(
+                hotel_location, params.hotel_check_in_date or params.start_date,
+                params.hotel_check_out_date or params.end_date, party=params)
         except Exception:
             logger.exception("Failed to refresh selected flight or search replacement hotels")
             return self._quoted_response(
                 "I couldn't check replacement quotes right now. Your previous recommendation remains saved; please try again."
             )
 
-        alternatives = [
-            {**hotel, "total_price": float(total)}
-            for hotel in hotels
-            if quote_facts(hotel, "hotel", params).id != selected.hotel.id
-            if (total := quote_total(hotel, "hotel", params)) is not None
-        ]
+        alternatives = []
+        for hotel in self._annotate_hotels(hotels, params):
+            total = quote_total(hotel, "hotel", params)
+            if quote_facts(hotel, "hotel", params).id != selected.hotel.id and total is not None \
+                    and hotel["accommodation_status"] != "contradicted":
+                alternatives.append({**hotel, "total_price": float(total)})
         if not alternatives:
             return self._quoted_response(
                 "I couldn't find a different hotel with a complete USD stay quote for the same dates and travelers. Your earlier recommendation remains saved."
             )
-        plan = find_cheapest_plan([flight], alternatives)
+        hotel_check_in = params.hotel_check_in_date or params.start_date
+        hotel_check_out = params.hotel_check_out_date or params.end_date
+        plan = find_cheapest_plan([flight], alternatives,
+                                  check_in_date=hotel_check_in, check_out_date=hotel_check_out,
+                                  accommodation_type=params.accommodation_type,
+                                  private_room_required=params.private_room_required)
         if not plan:
             return self._quoted_response(
                 "The other hotels did not match your flight arrival and check-in timing. Your earlier recommendation remains saved."
             )
+        self._annotate_selected_hotel(plan)
 
         summary = None
         if params.budget_amount is not None:
@@ -515,7 +525,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     summary,
                 )
 
-        response = self._format_travel_plan(plan, params, [], params.end_date)
+        response = self._format_travel_plan(plan, params, [], hotel_check_out)
         price_note = ("I refreshed the same flight itinerary at the provider's current quoted price. "
                       if refreshed else "I kept the selected flight quote from the last five minutes. ")
         response = (
@@ -531,16 +541,24 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
 
     @staticmethod
     def _partial_full_trip_response(params, flights, checkout, reason, attempts=0):
-        saved = retain_flights(flights, params, checkout, reason, attempts)
-        problem = ("The hotel search failed or timed out." if reason == "error"
-                   else "The hotel search returned no options for these dates.")
+        # The retry payload records provider errors vs. empty results. A filtered
+        # set is presented distinctly but uses the compatible empty-result code.
+        saved_reason = reason if reason in ("error", "empty") else "empty"
+        saved = retain_flights(flights, params, checkout, saved_reason, attempts)
+        if reason == "error":
+            problem = "The hotel search failed or timed out."
+        elif reason == "filtered":
+            problem = "The hotel results contradicted your accommodation requirements."
+        else:
+            problem = "The hotel search returned no options for these dates."
         retry = (" Select Retry hotels to check hotels again without repeating the flight search."
                  if saved else " Please start a new search when you're ready to try again.")
         response = (f"I found {len(flights)} flight option{'s' if len(flights) != 1 else ''}. "
                     + problem + " No flight + hotel total is verified." + retry)
         return {**TravelGraph._quoted_response(response),
                 "travel_result": travel_result("flight_only", params, flights=flights),
-                "recommendation": capture_flight_recommendation(flights, params),
+                "recommendation": capture_flight_recommendation(
+                    select_for_presentation(flights, params.flight_result_count, limit=5)[0], params),
                 "partial_search": saved, "retry_hotels": saved is not None}
 
     async def _complete_full_trip(self, params, flights, hotels, checkout, location):
@@ -551,12 +569,24 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             if not flights or not hotels:
                 return {**self._quoted_response("Try different dates to find complete prices.", assessment(params, None)),
                         "partial_search": None}
-        plan = find_cheapest_plan(flights, hotels)
+        hotel_check_in = params.hotel_check_in_date or params.start_date
+        hotel_check_out = params.hotel_check_out_date or checkout or params.end_date
+        plan = find_cheapest_plan(flights, hotels,
+                                  check_in_date=hotel_check_in, check_out_date=hotel_check_out,
+                                  accommodation_type=params.accommodation_type,
+                                  private_room_required=params.private_room_required)
         if not plan:
-            response = (f"I found {len(flights)} flights and {len(hotels)} hotels, but couldn't find a valid combination.\n\n"
+            response = (f"I found {len(flights)} flights and {len(hotels)} hotels, but couldn't find a valid combination. "
+                        "The separate flight and hotel quotes are still available above.\n\n"
                         "This usually happens when hotel check-in times conflict with flight arrival. "
                         "Try an earlier departure or later check-in time.")
-            return {**self._quoted_response(response), "partial_search": None}
+            return {**self._quoted_response(response),
+                    "travel_result": travel_result("full_trip", params, flights=flights, hotels=hotels,
+                                                   hotel_check_in_date=hotel_check_in,
+                                                   hotel_check_out_date=hotel_check_out,
+                                                   combine_quotes=False),
+                    "partial_search": None}
+        self._annotate_selected_hotel(plan)
         summary = None
         if params.budget_amount is not None:
             total = quote_total(plan["flight"], "flight", params) + quote_total(plan["hotel"], "hotel", params)
@@ -565,19 +595,75 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 return {**self._quoted_response("Try different dates or raise your quoted-cost budget. I have not selected an over-budget trip.", summary),
                         "partial_search": None}
         activities = []
-        emit("status", component="activities", message="Looking for activities")
-        try:
-            activities = await asyncio.wait_for(get_activities_via_a2a(location, "things to do"), timeout=PROVIDER_TIMEOUT_SECONDS)
-        except (Exception, asyncio.TimeoutError) as exc:
-            logger.warning("Activity search failed: %s", exc)
-            emit("error", component="activities", message="Activity provider unavailable")
-        response = self._format_travel_plan(plan, params, activities, checkout)
+        include_activities = params.include_activities is not False
+        if include_activities:
+            emit("status", component="activities", message="Looking for activities")
+            try:
+                activities = await asyncio.wait_for(get_activities_via_a2a(location, "things to do"), timeout=PROVIDER_TIMEOUT_SECONDS)
+            except (Exception, asyncio.TimeoutError) as exc:
+                logger.warning("Activity search failed: %s", exc)
+                emit("error", component="activities", message="Activity provider unavailable")
+        response = self._format_travel_plan(plan, params, activities, hotel_check_out)
+        if plan.get("provisional"):
+            notes = []
+            timing_message = plan.get("timing_assessment", {}).get("timing_message")
+            if timing_message:
+                notes.append(timing_message)
+            lodging = plan.get("accommodation_assessment", {})
+            if "room_privacy_unverified" in lodging.get("reasons", []):
+                notes.append("The provider did not confirm room privacy.")
+            if "property_type_unverified" in lodging.get("reasons", []):
+                notes.append("The provider did not confirm the accommodation type.")
+            response = ("This flight and hotel pairing is provisional. " + " ".join(notes) +
+                        " Confirm these details with the property before relying on it.\n\n" + response)
         return {**self._quoted_response(response, summary),
                 "recommendation": capture_recommendation(plan, params),
                 "travel_result": travel_result("full_trip", params, flights=[plan["flight"]],
                                                hotels=[plan["hotel"]], activities=activities,
-                                               hotel_checkout_date=checkout),
+                                               hotel_check_in_date=hotel_check_in,
+                                               hotel_check_out_date=hotel_check_out),
                 "partial_search": None}
+
+    @staticmethod
+    def _annotate_selected_hotel(plan):
+        """Attach the selected pair's pure assessments to the quote for cards."""
+        source = plan.get("hotel")
+        if not isinstance(source, dict):
+            return
+        hotel = dict(source)
+        plan["hotel"] = hotel
+        timing = plan.get("timing_assessment") or {}
+        lodging = plan.get("accommodation_assessment") or {}
+        hotel.update({
+            "timing_status": timing.get("timing_status"),
+            "timing_reason_codes": timing.get("timing_reason_codes", []),
+            "timing_message": timing.get("timing_message", ""),
+            "arrival_at_hotel": timing.get("arrival_at_hotel"),
+            "check_in_date": timing.get("check_in_date"),
+            "check_out_date": timing.get("check_out_date"),
+            "accommodation_status": lodging.get("status"),
+            "accommodation_reasons": lodging.get("reasons", []),
+            "accommodation_evidence": lodging.get("evidence", {}),
+            "provisional": bool(plan.get("provisional")),
+        })
+
+    @staticmethod
+    def _annotate_hotels(hotels, params):
+        """Attach requirement assessments so cards and prose use the same evidence."""
+        annotated = []
+        for source in hotels or []:
+            if not isinstance(source, dict):
+                continue
+            hotel = dict(source)
+            result = assess_accommodation(
+                hotel, params.accommodation_type, params.private_room_required)
+            hotel.update({
+                "accommodation_status": result["status"],
+                "accommodation_reasons": result["reasons"],
+                "accommodation_evidence": result["evidence"],
+            })
+            annotated.append(hotel)
+        return annotated
 
     async def _retry_hotels_node(self, state: GraphState) -> dict:
         try:
@@ -613,7 +699,8 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         emit("status", component="hotels", message="Retrying hotels")
         try:
             hotels = await asyncio.wait_for(get_hotels_via_a2a(
-                location, params.start_date, saved.hotel_checkout_date, party=params,
+                location, params.hotel_check_in_date or params.start_date,
+                params.hotel_check_out_date or saved.hotel_checkout_date, party=params,
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
         except (Exception, asyncio.TimeoutError):
             emit("error", component="hotels", message="Hotel provider unavailable")
@@ -622,8 +709,15 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         if not hotels:
             return self._partial_full_trip_response(params, flights, saved.hotel_checkout_date,
                                                     "empty", saved.attempts + 1)
+        hotels = [hotel for hotel in self._annotate_hotels(hotels, params)
+                  if hotel["accommodation_status"] != "contradicted"]
+        if not hotels:
+            return self._partial_full_trip_response(params, flights, saved.hotel_checkout_date,
+                                                    "filtered", saved.attempts + 1)
         emit("result", component="hotels", travel_result=travel_result(
-            "hotel_only", params, hotels=hotels, hotel_checkout_date=saved.hotel_checkout_date))
+            "hotel_only", params, hotels=hotels,
+            hotel_check_in_date=params.hotel_check_in_date or params.start_date,
+            hotel_check_out_date=params.hotel_check_out_date or saved.hotel_checkout_date))
         return await self._complete_full_trip(params, flights, hotels, saved.hotel_checkout_date, location)
 
     async def _travel_search_node(self, state: GraphState) -> dict:
@@ -659,7 +753,15 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 "latest_user_message": user_msg.content,
             })
             params = await self._extract_travel_params(context)
-        except ValidationError:
+        except ValidationError as exc:
+            count_fields = {"flight_result_count": "flight", "hotel_result_count": "hotel",
+                            "activity_result_count": "activity"}
+            invalid_count = next((count_fields.get(error.get("loc", [None])[-1])
+                                  for error in exc.errors()
+                                  if error.get("loc") and error["loc"][-1] in count_fields), None)
+            if invalid_count:
+                return {"messages": [AIMessage(content=f"How many {invalid_count} options should I show? Please give a whole number from 1 to 100.")],
+                        "search_params": state.get("search_params") or {}}
             return {"messages": [AIMessage(content="Please check your trip details. Use whole-number counts: 1–9 adults, 0–8 children with ages 0–17, and 1–9 requested rooms. I have kept your previous trip details.")]}
         except Exception as e:
             logger.error(f"Failed to extract travel params: {e}")
@@ -676,6 +778,8 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         if comparison_requested:
             params.search_type = "flight_only"
         # Persist extracted details even when the next response is a question.
+        trip = params.model_dump()
+        params = self._apply_explicit_scope(params, str(user_msg.content), state.get("search_params") or {})
         trip = params.model_dump()
         if party_question := params.question(params.search_type):
             return {"messages": [AIMessage(content=party_question)], "search_params": trip}
@@ -708,6 +812,84 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         return {**result, "search_params": trip}
 
     @staticmethod
+    def _apply_explicit_scope(params: TravelSearchArgs, user_text: str, saved: dict) -> TravelSearchArgs:
+        """Apply explicit category/count preferences deterministically after extraction."""
+        text = " ".join(user_text.lower().split())
+        clear_dates = bool(re.search(r"\b(?:remove|clear|forget|reset)\s+(?:the\s+)?(?:hotel\s+)?(?:dates?|check[- ]?in|check[- ]?out)\b", text))
+        clear_accommodation = bool(re.search(r"\b(?:remove|clear|forget|reset)\s+(?:the\s+)?accommodation preference\b", text))
+        relax_privacy = bool(re.search(
+            r"\b(?:no longer need|don't need|do not need|relax|remove)\s+(?:the\s+)?(?:a\s+)?private room(?: requirement)?\b"
+            r"|\bprivate room not required\b", text))
+        allow_any_lodging = bool(re.search(r"\b(?:any accommodation|hotels? or hostels?|allow hostels?)\b", text))
+        for field in ("flight_result_count", "hotel_result_count", "activity_result_count",
+                      "include_activities", "accommodation_type", "private_room_required",
+                      "hotel_check_in_date", "hotel_check_out_date"):
+            clearing_field = (
+                clear_dates and field in {"hotel_check_in_date", "hotel_check_out_date"}
+            ) or (clear_accommodation and field in {"accommodation_type", "private_room_required"}) or (
+                relax_privacy and field == "private_room_required"
+            ) or (allow_any_lodging and field == "accommodation_type")
+            if getattr(params, field) is None and saved.get(field) is not None and not clearing_field:
+                setattr(params, field, saved[field])
+
+        if clear_dates:
+            params.hotel_check_in_date = None
+            params.hotel_check_out_date = None
+        if clear_accommodation:
+            params.accommodation_type = None
+            params.private_room_required = None
+        if relax_privacy:
+            params.private_room_required = False
+        if allow_any_lodging:
+            params.accommodation_type = "any"
+
+        exclusions = bool(re.search(
+            r"\b(?:no|without|exclude|excluding|skip|don't include|do not include)\s+(?:any\s+)?(?:activities|activity|things to do)\b"
+            r"|\b(?:flights?\s+and\s+hotels?|hotels?\s+and\s+flights?)\s+only\b", text))
+        additions = bool(re.search(r"\b(?:add|include|with|show|find)\s+(?:some\s+)?(?:activities|things to do|attractions)\b", text))
+        if exclusions:
+            params.include_activities = False
+        elif additions:
+            params.include_activities = True
+        elif params.include_activities is None and saved.get("include_activities") is not None:
+            params.include_activities = saved["include_activities"]
+
+        positive_text = re.sub(
+            r"\b(?:no|without|exclude|excluding|skip|don't include|do not include)\s+(?:any\s+)?"
+            r"(?:activities|activity|things to do|flights?|hotels?|accommodation|lodging)"
+            r"(?:\s+(?:and|or)\s+(?:activities|activity|things to do|flights?|hotels?|accommodation|lodging))*\b",
+            " ", text)
+        has_flight = bool(re.search(r"\b(flights?|airfare|fly|flying)\b", positive_text))
+        has_hotel = bool(re.search(r"\b(hotels?|accommodation|lodging|stay)\b", positive_text))
+        has_activity = bool(re.search(r"\b(activities|activity|attractions)\b|things to do", positive_text))
+        only_activity = bool(re.search(r"\b(?:activities|things to do|attractions)\s+only\b|\bonly\s+(?:activities|things to do|attractions)\b", text))
+        only_hotel = bool(re.search(r"^(?:only\s+)?(?:hotels?|accommodation|lodging)\s+only\b|^only\s+(?:hotels?|accommodation|lodging)\b", text))
+        only_flight = bool(re.search(r"^(?:only\s+)?(?:flights?|airfare)\s+only\b|^only\s+(?:flights?|airfare)\b", text))
+        count_fields = (("flight", "flight_result_count"), ("hotel", "hotel_result_count"), ("activity", "activity_result_count"))
+        for category, field in count_fields:
+            count, invalid = explicit_requested_count(text, category)
+            if invalid:
+                params.clarification_question = f"How many {category} options should I show? Please give a number from 1 to 100."
+                return params
+            if count is not None:
+                setattr(params, field, count)
+
+        if (has_flight and has_activity and not has_hotel) or (has_hotel and has_activity and not has_flight):
+            params.clarification_question = "I can search flights, hotels, activities, or a full flight-and-hotel trip. Which search would you like?"
+        elif only_activity or (has_activity and not has_flight and not has_hotel and
+                             not (additions and saved.get("search_type") == "full_trip")):
+            params.search_type = "activity_only"
+        elif only_hotel or (has_hotel and not has_flight and not has_activity and params.search_type != "full_trip"):
+            params.search_type = "hotel_only"
+        elif only_flight or (has_flight and not has_hotel and not has_activity and params.search_type == "full_trip"):
+            params.search_type = "flight_only"
+        elif has_flight and has_hotel:
+            params.search_type = "full_trip"
+        elif additions and saved.get("search_type", params.search_type) == "full_trip":
+            params.search_type = "full_trip"
+        return params
+
+    @staticmethod
     def _quoted_response(response, summary=None):
         if summary:
             response = summary["message"] + "\n\n" + response
@@ -726,13 +908,19 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 return "Where will you be flying from?"
         elif not location:
             return "Which city would you like to stay in?"
-        if not params.start_date:
-            return "What date would you like to leave?" if params.search_type != "hotel_only" else "What is your check-in date?"
-        if not params.end_date:
-            if params.search_type in ("hotel_only", "full_trip"):
-                return "What is your check-out date?" if params.search_type == "hotel_only" or params.is_one_way else "What date would you like to return?"
-            if not params.is_one_way:
+        if params.search_type in ("flight_only", "full_trip"):
+            if not params.start_date:
+                return "What date would you like to leave?"
+            if not params.end_date and not params.is_one_way:
                 return "What date would you like to return, or is this a one-way flight?"
+        if (params.search_type == "full_trip" and params.is_one_way
+                and not (params.hotel_check_out_date or params.end_date)):
+            return "What hotel check-out date would you prefer?"
+        if params.search_type == "hotel_only":
+            if not (params.hotel_check_in_date or params.start_date):
+                return "What is your check-in date?"
+            if not (params.hotel_check_out_date or params.end_date):
+                return "What is your check-out date?"
         return None
 
     async def _handle_activity_only_search(self, params: TravelSearchArgs) -> dict:
@@ -760,7 +948,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             if not activities:
                 return {"messages": [AIMessage(content=f"I couldn't find any activities in {location}. Please try another location.")]}
             
-            response = self._format_activities_only(activities, location)
+            response = self._format_activities_only(activities, location, params)
             emit("result", component="activities", travel_result=travel_result(
                 "activity_only", params, activities=activities))
             return {"messages": [AIMessage(content=response)], "full_response": response,
@@ -789,11 +977,13 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 "Example: 'Find hotels in Paris from March 1 to March 5'"
             )]}
         
-        if not params.start_date or not params.end_date:
+        hotel_start = params.hotel_check_in_date or params.start_date
+        hotel_end = params.hotel_check_out_date or params.end_date
+        if not hotel_start or not hotel_end:
             clarification = f"To find hotels in {location}, I need:\n\n"
-            if not params.start_date:
+            if not hotel_start:
                 clarification += "- **Check-in Date**: When do you want to check in?\n"
-            if not params.end_date:
+            if not hotel_end:
                 clarification += "- **Check-out Date**: When do you want to check out?\n"
             return {"messages": [AIMessage(content=clarification)]}
         
@@ -802,8 +992,13 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         try:
             emit("status", component="hotels", message="Searching hotels")
             hotels = await asyncio.wait_for(get_hotels_via_a2a(
-                location, params.start_date, params.end_date, party=params,
+                location, hotel_start, hotel_end, party=params,
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
+            hotels = [hotel for hotel in self._annotate_hotels(hotels, params)
+                      if hotel["accommodation_status"] != "contradicted"]
+            if not hotels:
+                return {"messages": [AIMessage(content=(
+                    "The hotel results conflict with your accommodation requirements. You can relax the requirement or ask me to search again."))]}
             summary = None
             if params.budget_amount is not None:
                 hotels, summary = filter_quotes(hotels, "hotel", params)
@@ -812,12 +1007,19 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             
             if not hotels:
                 return {"messages": [AIMessage(content=f"I couldn't find any hotels in {location} for those dates. Please try different dates or another location.")]}
+
+            hotels = sorted(hotels, key=lambda h: (
+                -(h.get("overall_rating", 0) or h.get("rating", 0) or 0),
+                h.get("price", float("inf")) or float("inf")))
             
             response = self._format_hotels_only(hotels, location, params)
             emit("result", component="hotels", travel_result=travel_result(
-                "hotel_only", params, hotels=hotels))
+                "hotel_only", params, hotels=hotels,
+                hotel_check_in_date=hotel_start, hotel_check_out_date=hotel_end))
             return {**self._quoted_response(response, summary),
-                    "travel_result": travel_result("hotel_only", params, hotels=hotels)}
+                    "travel_result": travel_result("hotel_only", params, hotels=hotels,
+                                                    hotel_check_in_date=hotel_start,
+                                                    hotel_check_out_date=hotel_end)}
             
         except Exception as e:
             logger.error(f"Error searching hotels: {e}")
@@ -873,9 +1075,10 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             response = self._format_flights_only(flights, params)
             emit("result", component="flights", travel_result=travel_result(
                 "flight_only", params, flights=flights))
+            selected_flights, _ = select_for_presentation(flights, params.flight_result_count, limit=5)
             return {**self._quoted_response(response, summary),
                     "travel_result": travel_result("flight_only", params, flights=flights),
-                    "recommendation": capture_flight_recommendation(flights, params)}
+                    "recommendation": capture_flight_recommendation(selected_flights, params)}
             
         except Exception as e:
             logger.error(f"Error searching flights: {e}")
@@ -1001,9 +1204,10 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 clarification += "- **Return Date**: When do you want to return? (or say 'one-way')\n"
             return {"messages": [AIMessage(content=clarification)], "search_params": params.model_dump()}
         
-        # For one-way trips, calculate hotel checkout date (1 night stay)
-        hotel_checkout_date = params.end_date
-        if not params.end_date:
+        # Explicit hotel dates take precedence over flight dates.
+        hotel_checkin_date = params.hotel_check_in_date or params.start_date
+        hotel_checkout_date = params.hotel_check_out_date or params.end_date
+        if not params.end_date and not params.hotel_check_out_date:
             try:
                 start_dt = datetime.strptime(params.start_date.strip()[:10], "%Y-%m-%d")
                 checkout_dt = start_dt + timedelta(days=1)
@@ -1032,12 +1236,37 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             emit("result", component="flights", travel_result=travel_result(
                 "flight_only", params, flights=flights))
 
+            # A next-day destination arrival makes an implicit hotel check-in
+            # ambiguous. Ask before spending another provider call on hotels.
+            if not params.hotel_check_in_date:
+                try:
+                    planned_checkin = date.fromisoformat(params.start_date)
+                except (TypeError, ValueError):
+                    planned_checkin = None
+                overnight = False
+                for flight in flights:
+                    try:
+                        raw_arrival = str(flight.get("arrival_time") or "").replace("Z", "+00:00")
+                        arrival = datetime.fromisoformat(raw_arrival)
+                        hotel_arrival = arrival + timedelta(hours=TRAVEL_HOTEL_CHECKIN_GAP_HOURS)
+                        overnight = overnight or bool(planned_checkin and hotel_arrival.date() != planned_checkin)
+                    except (TypeError, ValueError):
+                        continue
+                if overnight:
+                    response = ("At least one flight arrives on the following local calendar date. "
+                                "What hotel check-in and check-out dates should I use? I haven't searched hotels yet.")
+                    return {"messages": [AIMessage(content=response)], "full_response": response,
+                            "search_params": params.model_dump(),
+                            "travel_result": travel_result("flight_only", params, flights=flights),
+                            "recommendation": capture_flight_recommendation(
+                                select_for_presentation(flights, params.flight_result_count, limit=5)[0], params)}
+
             # Search for hotels
             hotel_location = params.destination_city or params.destination
             emit("status", component="hotels", message="Searching hotels")
             try:
                 hotels = await asyncio.wait_for(get_hotels_via_a2a(
-                    hotel_location, params.start_date, hotel_checkout_date, party=params,
+                    hotel_location, hotel_checkin_date, hotel_checkout_date, party=params,
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             except (Exception, asyncio.TimeoutError):
                 logger.exception("Hotel search failed after flights were found")
@@ -1047,8 +1276,16 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             if not hotels:
                 return self._partial_full_trip_response(params, flights, hotel_checkout_date, "empty")
 
+            hotels = [hotel for hotel in self._annotate_hotels(hotels, params)
+                      if hotel["accommodation_status"] != "contradicted"]
+            if not hotels:
+                return self._partial_full_trip_response(
+                    params, flights, hotel_checkout_date, "filtered")
+
             emit("result", component="hotels", travel_result=travel_result(
-                "hotel_only", params, hotels=hotels, hotel_checkout_date=hotel_checkout_date))
+                "hotel_only", params, hotels=hotels,
+                hotel_check_in_date=hotel_checkin_date,
+                hotel_check_out_date=hotel_checkout_date))
             return await self._complete_full_trip(params, flights, hotels, hotel_checkout_date, hotel_location)
             
         except Exception as e:
@@ -1103,6 +1340,13 @@ limits including meals/activities/transfers; the app will explain unsupported sc
 Leave budget_scope null when unclear. If switching search types with a saved budget,
 ask whether the limit should now apply to the new search before applying it.
 If the assistant asked to confirm quoted-cost scope, a positive answer sets quoted_total.
+Preserve `include_activities` on follow-ups. For a full trip, use false only when
+the user explicitly excludes activities; an explicit later request to add activities
+sets it true. Counts apply only to displayed option counts and never party size,
+rooms, nights, or dates. Extract counts only when clearly tied to flights, hotels,
+or activities. Preserve explicit accommodation_type, private_room_required, and
+hotel_check_in_date/hotel_check_out_date on follow-ups. Clear these only when the
+user explicitly relaxes/removes them. Hotel dates are distinct from flight dates.
 Extract adults (18+), children (under 18, including infants), children_ages and rooms.
 Preserve these across replies and corrections, including unsupported room counts.
 New trips default to 1 adult, 0 children and 1 room unless the user says otherwise.
@@ -1444,7 +1688,9 @@ List any missing parameters in missing_params field."""
 
     def _validate_dates(self, params: TravelSearchArgs) -> str:
         parsed = {}
-        for field in ("start_date", "end_date"):
+        flight_dates_matter = params.search_type in ("flight_only", "full_trip")
+        hotel_dates_matter = params.search_type in ("hotel_only", "full_trip")
+        for field in (("start_date", "end_date") if flight_dates_matter else ()):
             value = getattr(params, field)
             if not value:
                 continue
@@ -1455,25 +1701,54 @@ List any missing parameters in missing_params field."""
             if parsed[field] < datetime.now().date():
                 return f"The date {value} is in the past. What future date would you prefer?"
         start, end = parsed.get("start_date"), parsed.get("end_date")
-        if start and end:
+        if hotel_dates_matter:
+            if params.search_type == "hotel_only":
+                date_sources = {
+                    "hotel_check_in_date": params.hotel_check_in_date or params.start_date,
+                    "hotel_check_out_date": params.hotel_check_out_date or params.end_date,
+                }
+            else:
+                date_sources = {
+                    "hotel_check_in_date": params.hotel_check_in_date,
+                    "hotel_check_out_date": params.hotel_check_out_date,
+                }
+            for field, value in date_sources.items():
+                if not value:
+                    continue
+                try:
+                    lodging_date = datetime.strptime(value, "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    return "Please provide valid hotel dates in YYYY-MM-DD format."
+                if lodging_date < datetime.now().date():
+                    return f"The hotel date {value} is in the past. What future date would you prefer?"
+                parsed[field] = lodging_date
+        if hotel_dates_matter:
+            hotel_start = parsed.get("hotel_check_in_date", start)
+            hotel_end = parsed.get("hotel_check_out_date", end)
+            if hotel_start and hotel_end and hotel_end <= hotel_start:
+                return "Hotel check-out must be after check-in. What check-out date should I use?"
+        if flight_dates_matter and start and end:
             if end < start:
                 return "The return or check-out date is before departure. What end date would you prefer?"
-            if end == start and params.search_type in ("hotel_only", "full_trip"):
+        if (params.search_type == "hotel_only"
+                and parsed.get("hotel_check_in_date") and parsed.get("hotel_check_out_date")
+                and parsed["hotel_check_out_date"] == parsed["hotel_check_in_date"]):
                 return "A hotel stay needs at least one night. What check-out date would you prefer?"
         return ""
 
-    def _format_activities_only(self, activities: list, location: str) -> str:
+    def _format_activities_only(self, activities: list, location: str, params: TravelSearchArgs | None = None) -> str:
         """
         Format activity-only search results.
         
         Shows a list of things to do at the specified location.
         """
+        selected, notice = select_for_presentation(activities, params.activity_result_count if params else None, limit=5)
         response = f"""🎯 **Things to Do in {location}**
 
 Here are the top activities and attractions I found:
 
 """
-        for i, activity in enumerate(activities[:10], 1):
+        for i, activity in enumerate(selected, 1):
             name = activity.get('name', 'Unknown')
             rating = activity.get('rating', 0)
             reviews = activity.get('reviews', 0)
@@ -1491,6 +1766,8 @@ Here are the top activities and attractions I found:
                 response += f"   {rating_str} {reviews_str}\n"
             response += "\n"
 
+        if notice:
+            response += notice + "\n\n"
         response += f"""---
 
 Would you like more details about any of these, or should I search for flights and hotels to {location}?"""
@@ -1506,8 +1783,8 @@ Would you like more details about any of these, or should I search for flights a
         """
         # Calculate number of nights
         try:
-            start_dt = datetime.strptime(params.start_date.strip()[:10], "%Y-%m-%d")
-            end_dt = datetime.strptime(params.end_date.strip()[:10], "%Y-%m-%d")
+            start_dt = datetime.strptime((params.hotel_check_in_date or params.start_date).strip()[:10], "%Y-%m-%d")
+            end_dt = datetime.strptime((params.hotel_check_out_date or params.end_date).strip()[:10], "%Y-%m-%d")
             nights = max(1, (end_dt - start_dt).days)
         except (ValueError, TypeError, AttributeError):
             nights = 1
@@ -1522,20 +1799,22 @@ Would you like more details about any of these, or should I search for flights a
                 h.get('price', float('inf')) or float('inf')  # Lower price second
             )
         )
+        sorted_hotels, selection_notice = select_for_presentation(
+            sorted_hotels, params.hotel_result_count, limit=5)
         
         response = f"""🏨 **Top Hotels in {location}**
 
-Dates: {params.start_date} to {params.end_date} ({nights_text})
+Dates: {params.hotel_check_in_date or params.start_date} to {params.hotel_check_out_date or params.end_date} ({nights_text})
 Sorted by rating (best first):
 
 """
-        for i, hotel in enumerate(sorted_hotels[:10], 1):
+        for i, hotel in enumerate(sorted_hotels, 1):
             name = hotel.get('name', 'Unknown Hotel')
             price_per_night = hotel.get('price', 0) or 0
             total_price = hotel.get('total_price', price_per_night * nights)
             overall_rating = hotel.get('overall_rating', 0) or hotel.get('rating', 0) or 0
             location_rating = hotel.get('location_rating', 0) or 0
-            check_in = hotel.get('check_in_time', '3:00 PM')
+            check_in = hotel.get('check_in_time') or 'Not provided by provider'
             
             # Format rating with stars
             if overall_rating:
@@ -1548,14 +1827,20 @@ Sorted by rating (best first):
             location_str = f"📍 Location: {location_rating:.1f}/5" if location_rating else ""
             
             response += f"**{i}. {name}**\n"
-            response += f"   💰 ${price_per_night:.2f}/night × {nights} = **${total_price:.2f} total**\n"
+            response += f"   💰 ${price_per_night:.2f}/night; quoted stay total **${total_price:.2f} for {nights} nights**\n"
             response += f"   {rating_str}"
             if location_str:
                 response += f" | {location_str}"
             response += "\n"
             response += f"   🕐 Check-in: {check_in}\n"
+            lodging_status = assess_accommodation(
+                hotel, params.accommodation_type, params.private_room_required)["status"]
+            if lodging_status == "unknown" and (params.accommodation_type or params.private_room_required is True):
+                response += "   ⚠️ Accommodation requirement not verified by provider data\n"
             response += "\n"
 
+        if selection_notice:
+            response += selection_notice + "\n\n"
         response += f"""---
 
 Would you like me to also find flights to {location}?"""
@@ -1582,10 +1867,12 @@ Would you like me to also find flights to {location}?"""
         else:
             response += f"**Dates**: {params.start_date} to {params.end_date}\n\n"
 
-        response += f"Here are the top {min(5, len(flights))} flight options:\n\n"
+        selected_flights, selection_notice = select_for_presentation(
+            flights, params.flight_result_count, limit=5)
+        response += f"Here are the top {len(selected_flights)} flight options:\n\n"
         
         # Show only top 5 flights with card-style format
-        for i, flight in enumerate(flights[:5], 1):
+        for i, flight in enumerate(selected_flights, 1):
             price = flight.get('price', 0) or 0
             airline = flight.get('airline', 'Unknown')
             departure = flight.get('departure_time', 'N/A')
@@ -1635,6 +1922,8 @@ Would you like me to also find flights to {location}?"""
             
             response += "\n"
 
+        if selection_notice:
+            response += selection_notice + "\n\n"
         response += f"""---
 
 Would you like me to also find hotels at {params.destination_city or params.destination}?"""
@@ -1677,8 +1966,8 @@ Would you like me to also find hotels at {params.destination_city or params.dest
         # For one-way trips, use the calculated hotel_checkout_date (1 night)
         # For round-trip, use end_date
         try:
-            start_dt = datetime.strptime(params.start_date.strip()[:10], "%Y-%m-%d")
-            end_dt = datetime.strptime((hotel_checkout_date or params.end_date).strip()[:10], "%Y-%m-%d")
+            start_dt = datetime.strptime((params.hotel_check_in_date or params.start_date).strip()[:10], "%Y-%m-%d")
+            end_dt = datetime.strptime((hotel_checkout_date or params.hotel_check_out_date or params.end_date).strip()[:10], "%Y-%m-%d")
             nights = max(1, (end_dt - start_dt).days)
         except (ValueError, TypeError, AttributeError):
             nights = 1  # Default to 1 night if date parsing fails
@@ -1700,7 +1989,9 @@ Would you like me to also find hotels at {params.destination_city or params.dest
         trip_type = "one-way" if is_one_way else "round-trip"
         flight_price_label = "(one-way)" if is_one_way else "(round-trip)"
 
-        response = f"""🎉 **I found the lowest eligible quote among the returned options for your {trip_type} trip.**
+        heading = ("Here is a provisional pairing from the returned options" if plan.get("provisional")
+                   else "I found the lowest eligible quote among returned options")
+        response = f"""🎉 **{heading} for your {trip_type} trip.**
 
 **💰 Total Cost: ${total_price:.2f}**
 - ✈️ Flight: ${flight_price:.2f} {flight_price_label}
@@ -1738,21 +2029,24 @@ Would you like me to also find hotels at {params.destination_city or params.dest
         response += f"""
 🏨 **Hotel Details**
 - **Name**: {hotel.get('name', 'Unknown Hotel')}
-- **Price**: ${hotel_price_per_night:.2f}/night × {nights} = ${hotel_total_price:.2f} total
+- **Price**: ${hotel_price_per_night:.2f}/night; quoted stay total ${hotel_total_price:.2f} for {nights} nights
 - **Overall Rating**: {rating_display}
 - **Location Rating**: {location_display}
-- **Check-in**: {hotel.get('check_in_time', '3:00 PM')}
+- **Check-in**: {hotel.get('check_in_time') or 'Not provided by provider'}
+- **Stay dates**: {params.hotel_check_in_date or params.start_date} to {hotel_checkout_date or params.hotel_check_out_date or params.end_date}
 """
 
         # Add activities section if activities were found
         if activities:
+            selected_activities, selection_notice = select_for_presentation(
+                activities, params.activity_result_count, limit=5)
             response += f"""
 ---
 
 🎯 **Things to Do in {params.destination_city or params.destination}**
 """
             # Show top 5 activities
-            for i, activity in enumerate(activities[:5], 1):
+            for i, activity in enumerate(selected_activities, 1):
                 name = activity.get('name', 'Unknown')
                 rating = activity.get('rating', 0)
                 reviews = activity.get('reviews', 0)
@@ -1764,6 +2058,8 @@ Would you like me to also find hotels at {params.destination_city or params.dest
                 type_str = f" - {activity_type}" if activity_type else ""
                 
                 response += f"- **{name}**{type_str} {rating_str} {reviews_str}\n"
+            if selection_notice:
+                response += f"\n{selection_notice}\n"
 
         # Format trip summary based on trip type
         if is_one_way:

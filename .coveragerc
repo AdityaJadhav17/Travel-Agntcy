@@ -16,5 +16,7 @@ include =
     */graph/nearby_airports.py
     */graph/travel_results.py
     */travel/party.py
+    */travel/lodging.py
+    */graph/presentation_selection.py
 fail_under = 90
 show_missing = True

@@ -180,3 +180,23 @@ with 96.57% configured coverage; restart persistence passed and conversation
 evaluation passed 10/10 scenarios with zero incorrect assumptions. Reports and
 service logs were retained in `.runtime/ci/`, then the isolated test stack was
 removed. API schemas and backend behavior were not changed.
+
+## Travel preferences and lodging assessments
+
+Travel preferences belong to the saved trip, not a transient stream. Explicit
+category exclusions and presentation counts are resolved before provider dispatch;
+clarification replies retain them, and an explicit correction updates them. Hotel
+stay dates are separate from flight dates and travel with retry/replacement state.
+
+Lodging eligibility has three outcomes: `matched`, `contradicted`, and `unknown`.
+Contradicted options cannot satisfy an explicit requirement. Unknown evidence is
+visible as unverified; a room count is never evidence of a private room.
+
+Arrival compatibility is independently `compatible`, `incompatible`, or
+`needs_confirmation`. A prior-night booking does not establish that a property
+will retain a room for late arrival. An uncertain pairing remains provisional in
+both its immediate result and saved explanation. Separate quotes do not acquire
+a combined total merely because both providers returned results.
+
+See [the implementation and validation plan](travel-preference-fixes-plan.md) for
+acceptance cases and verification results for this follow-up.
