@@ -1,0 +1,6 @@
+# Explicit opt-in for native Python agents running on this trusted machine.
+# The default Docker stack keeps this broker inaccessible through host ports.
+services:
+  nats:
+    ports:
+      - "127.0.0.1:4222:4222"

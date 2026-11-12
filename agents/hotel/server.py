@@ -13,6 +13,7 @@ Based on the original lungo farm_server.py pattern.
 import asyncio
 import os
 from dotenv import load_dotenv
+from agents.travel.service_lifecycle import run_service
 from uvicorn import Config, Server
 
 from agntcy_app_sdk.semantic.a2a.protocol import A2AProtocol
@@ -71,12 +72,15 @@ async def run_transport(server, transport_type, endpoint):
         ))
 
         await app_session.start_session("private_session")
+        # Subscription setup returns immediately; retain ownership until shutdown.
+        await asyncio.Event().wait()
 
     except Exception as e:
         print(f"Transport encountered an error: {e}")
+        raise
+    finally:
         if app_session is not None:
             await app_session.stop_all_sessions()
-        raise
 
 
 async def main(enable_http: bool):
@@ -91,17 +95,10 @@ async def main(enable_http: bool):
         http_handler=request_handler
     )
 
-    # Run HTTP server and transport logic concurrently (same pattern as original)
-    tasks = []
-    if enable_http:
-        tasks.append(asyncio.create_task(run_http_server(server)))
-    tasks.append(asyncio.create_task(run_transport(
-        server, 
-        DEFAULT_MESSAGE_TRANSPORT, 
-        TRANSPORT_SERVER_ENDPOINT
-    )))
-    
-    await asyncio.gather(*tasks)
+    await run_service(
+        (lambda: run_http_server(server)) if enable_http else None,
+        lambda: run_transport(server, DEFAULT_MESSAGE_TRANSPORT, TRANSPORT_SERVER_ENDPOINT),
+    )
 
 
 if __name__ == '__main__':

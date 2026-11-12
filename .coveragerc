@@ -9,6 +9,7 @@ source =
 [report]
 include =
     */conversations.py
+    */security.py
     */graph/budgets.py
     */graph/recommendations.py
     */graph/partial_searches.py
@@ -17,6 +18,8 @@ include =
     */graph/travel_results.py
     */travel/party.py
     */travel/lodging.py
+    */travel/provider_http.py
+    */travel/service_lifecycle.py
     */graph/presentation_selection.py
 fail_under = 90
 show_missing = True

@@ -41,7 +41,7 @@ export const shouldEnableRetries = (_pattern?: string): boolean => {
  * The travel agent runs on port 8000 by default
  */
 export const getApiUrlForPattern = (_pattern?: string): string => {
-  const DEFAULT_TRAVEL_API_URL = "http://127.0.0.1:8000"
+  const DEFAULT_TRAVEL_API_URL = "/api"
   const TRAVEL_APP_API_URL =
     import.meta.env.VITE_EXCHANGE_APP_API_URL || DEFAULT_TRAVEL_API_URL
 

@@ -7,9 +7,10 @@ import React, { useRef, useState, useEffect } from "react"
 import axios from "axios"
 import { v4 as uuid } from "uuid"
 import { Message } from "@/types/message"
-import { isLocalDev, parseApiError, Role } from "@/utils/const"
+import { parseApiError, Role } from "@/utils/const"
 import { withRetry, RETRY_CONFIG } from "@/utils/retryUtils"
 import { shouldEnableRetries, getApiUrlForPattern } from "@/utils/patternUtils"
+import { signalAuthExpired } from "@/utils/authSession"
 
 import {
   readTravelStream,
@@ -104,7 +105,7 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
         { prompt, conversation_id: conversationId, request_id: requestId },
         {
           signal: controller.signal,
-          withCredentials: !isLocalDev,
+          withCredentials: true,
         },
       )
       return response.data
@@ -118,6 +119,7 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
       }
     } catch (error) {
       const { status, message } = parseApiError(error)
+      if (status === 401) signalAuthExpired()
       if (status && status >= 400 && status < 500) {
         throw new Error(`HTTP ${status} - ${message}`, { cause: error })
       }
@@ -150,10 +152,11 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
             request_id: requestId,
           }),
           signal: controller.signal,
-          credentials: isLocalDev ? "same-origin" : "include",
+          credentials: "include",
         },
       )
       if (!response.ok || !response.body) {
+        if (response.status === 401) signalAuthExpired()
         throw new TravelStreamError(
           `Travel service returned HTTP ${response.status}.`,
           undefined,
@@ -229,7 +232,7 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
         { prompt },
         {
           signal: controller.signal,
-          withCredentials: !isLocalDev,
+          withCredentials: true,
         },
       )
       return response.data
@@ -288,6 +291,7 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
       }
     } catch (error) {
       const { status, message } = parseApiError(error)
+      if (status === 401) signalAuthExpired()
       const userMessage =
         status && status >= 400 && status < 500
           ? `HTTP ${status} - ${message}`
@@ -317,9 +321,16 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
   }
 
   const deleteConversation = async (conversationId: string) => {
-    await axios.delete(
-      `${getApiUrlForPattern()}/conversations/${conversationId}`,
-    )
+    try {
+      await axios.delete(
+        `${getApiUrlForPattern()}/conversations/${conversationId}`,
+        { withCredentials: true },
+      )
+    } catch (error) {
+      const { status } = parseApiError(error)
+      if (status === 401) signalAuthExpired()
+      throw error
+    }
   }
 
   return {

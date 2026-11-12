@@ -19,7 +19,11 @@ start = date.today() + timedelta(days=30)
 end = start + timedelta(days=3)
 prompt = args.prompt or f'Find flights, hotels, and activities from DFW to New York for {start} to {end}.'
 endpoint = '/agent/prompt/stream' if args.stream else '/agent/prompt'
-request = urllib.request.Request(args.base_url + endpoint, data=json.dumps({'prompt': prompt}).encode(), headers={'Content-Type': 'application/json'})
+headers = {'Content-Type': 'application/json'}
+access_key = os.getenv('TRAVEL_ACCESS_KEY') or dotenv_values().get('TRAVEL_ACCESS_KEY')
+if access_key:
+    headers['Authorization'] = f'Bearer {access_key}'
+request = urllib.request.Request(args.base_url + endpoint, data=json.dumps({'prompt': prompt}).encode(), headers=headers)
 try:
     with urllib.request.urlopen(request, timeout=240) as response:
         print('HTTP', response.status)

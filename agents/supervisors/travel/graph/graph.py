@@ -45,6 +45,7 @@ from agents.travel.serpapi_tools import driving_route_from_airport
 from agents.travel.lodging import assess_accommodation
 from common.llm import get_llm
 from config.config import TRAVEL_HOTEL_CHECKIN_GAP_HOURS
+from common.travel_timing import timed
 
 logger = logging.getLogger("lungo.travel.supervisor.graph")
 PROVIDER_TIMEOUT_SECONDS = 20
@@ -273,11 +274,17 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             if not self.supervisor_llm:
                 self.supervisor_llm = get_llm(role="intent")
             chain = prompt | self.supervisor_llm
-            response = await asyncio.wait_for(chain.ainvoke({"user_message": user_message}), timeout=15)
-            intent = response.text.strip().lower()
         except Exception as exc:
             logger.warning("Intent classification unavailable: %s", type(exc).__name__)
             intent = ""
+        else:
+            try:
+                async with timed("intent_classification", category="model"):
+                    response = await asyncio.wait_for(chain.ainvoke({"user_message": user_message}), timeout=15)
+                intent = response.text.strip().lower()
+            except Exception as exc:
+                logger.warning("Intent classification unavailable: %s", type(exc).__name__)
+                intent = ""
 
         logger.info(f"Supervisor classified intent as: {intent}")
 
@@ -752,7 +759,8 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 "recent_conversation": [{"role": m.type, "content": m.content} for m in state["messages"][-12:]],
                 "latest_user_message": user_msg.content,
             })
-            params = await self._extract_travel_params(context)
+            async with timed("parameter_extraction", category="model"):
+                params = await self._extract_travel_params(context)
         except ValidationError as exc:
             count_fields = {"flight_result_count": "flight", "hotel_result_count": "hotel",
                             "activity_result_count": "activity"}

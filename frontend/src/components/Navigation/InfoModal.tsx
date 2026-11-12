@@ -5,6 +5,7 @@
 
 import React from "react"
 import { X } from "lucide-react"
+import { getApiUrlForPattern, PATTERNS } from "@/utils/patternUtils"
 
 interface InfoModalProps {
   isOpen: boolean
@@ -22,9 +23,7 @@ interface BuildInfo {
 }
 
 const InfoModal: React.FC<InfoModalProps> = ({ isOpen, onClose }) => {
-  const DEFAULT_EXCHANGE_APP_API_URL = "http://127.0.0.1:8000"
-  const EXCHANGE_APP_API_URL =
-    import.meta.env.VITE_EXCHANGE_APP_API_URL || DEFAULT_EXCHANGE_APP_API_URL
+  const EXCHANGE_APP_API_URL = getApiUrlForPattern(PATTERNS.TRAVEL_SEARCH)
 
   const [info, setInfo] = React.useState<BuildInfo | null>(null)
   const [error, setError] = React.useState<string | null>(null)
@@ -35,7 +34,9 @@ const InfoModal: React.FC<InfoModalProps> = ({ isOpen, onClose }) => {
     const fetchInfo = async () => {
       try {
         setError(null)
-        const res = await fetch(`${EXCHANGE_APP_API_URL}/about`)
+        const res = await fetch(`${EXCHANGE_APP_API_URL}/about`, {
+          credentials: "include",
+        })
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}: ${res.statusText}`)
         }

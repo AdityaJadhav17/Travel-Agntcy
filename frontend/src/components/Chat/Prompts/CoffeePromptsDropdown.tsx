@@ -13,11 +13,10 @@ import React, { useState, useRef, useEffect } from "react"
 import { Plane } from "lucide-react"
 import LoadingSpinner from "./LoadingSpinner"
 import { PromptCategory } from "./PromptTypes"
+import { getApiUrlForPattern } from "@/utils/patternUtils"
 
 // API URL for the travel supervisor
-const DEFAULT_TRAVEL_API_URL = "http://127.0.0.1:8000"
-const TRAVEL_API_URL =
-  import.meta.env.VITE_EXCHANGE_APP_API_URL || DEFAULT_TRAVEL_API_URL
+const TRAVEL_API_URL = getApiUrlForPattern()
 
 interface TravelPromptsDropdownProps {
   visible: boolean
@@ -53,6 +52,7 @@ const TravelPromptsDropdown: React.FC<TravelPromptsDropdownProps> = ({
         const res = await fetch(url, {
           cache: "no-cache",
           signal: controller.signal,
+          credentials: "include",
         })
 
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
