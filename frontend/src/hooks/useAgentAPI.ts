@@ -33,6 +33,7 @@ interface UseAgentAPIReturn {
     conversationId: string,
     onEvent: (event: TravelStreamEvent) => void,
     requestId?: string,
+    onTimingId?: (timingId: string | null) => void,
   ) => Promise<ApiResponse>
   cancelStream: (conversationId: string) => void
   deleteConversation: (conversationId: string) => Promise<void>
@@ -137,6 +138,7 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
     conversationId: string,
     onEvent: (event: TravelStreamEvent) => void,
     requestId = uuid(),
+    onTimingId?: (timingId: string | null) => void,
   ): Promise<ApiResponse> => {
     const controller = new AbortController()
     streamControllers.current.set(conversationId, controller)
@@ -155,6 +157,7 @@ export const useAgentAPI = (): UseAgentAPIReturn => {
           credentials: "include",
         },
       )
+      onTimingId?.(response.headers.get("X-Travel-Timing-Id"))
       if (!response.ok || !response.body) {
         if (response.status === 401) signalAuthExpired()
         throw new TravelStreamError(

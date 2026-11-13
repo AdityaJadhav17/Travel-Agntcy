@@ -88,6 +88,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
     allow_credentials=True,
+    expose_headers=["X-Travel-Timing-Id"],
 )
 app.add_middleware(TravelTimingMiddleware)
 

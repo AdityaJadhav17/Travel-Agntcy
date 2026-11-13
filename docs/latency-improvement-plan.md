@@ -6,6 +6,11 @@ Connection pooling is also implemented and validated (see Phase 3 execution
 record below). Flight/hotel overlap and combined model decisions remain planned.
 No paid requests were made for this implementation's validation.
 
+Browser end-to-end diagnostics were added on 2026-11-13. See
+[Measuring latency](measuring-latency.md) for collection instructions, metric
+definitions, server correlation and limitations. Rendering timings approximate
+paint opportunities; terminal receipt is distinct from network completion.
+
 ## Objective
 
 Reduce time to the first useful travel result and time to a completed response,
