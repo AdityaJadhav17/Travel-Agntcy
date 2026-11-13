@@ -26,6 +26,7 @@ dependencies = [
     "agntcy-app-sdk==0.4.7",
 
     # Patched minimums; uv.lock fixes the tested transitive versions.
+    "soupsieve>=4.0,<5",
     "langchain-core>=1.3.3,<2",
     "urllib3>=2.7.0,<3",
     "aiohttp>=3.14.4,<4",
