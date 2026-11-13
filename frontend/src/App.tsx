@@ -9,6 +9,7 @@ import React, {
   useRef,
   useCallback,
   useReducer,
+  useLayoutEffect,
 } from "react"
 import { LOCAL_STORAGE_KEY } from "@/components/Chat/Messages"
 import { logger } from "@/utils/logger"
@@ -26,6 +27,7 @@ import StructuredTravelResultCard from "@/components/Chat/StructuredTravelResult
 import { parseTravelResult } from "@/types/travelResult"
 import { Plane } from "lucide-react"
 import { ChatRequests } from "@/stores/chatRequests"
+import type { ChatRequestToken } from "@/stores/chatRequests"
 import { TravelStreamError } from "@/utils/travelStream"
 import {
   chatDisplayReducer,
@@ -34,11 +36,38 @@ import {
   type ChatHistoryItem,
 } from "@/stores/chatDisplay"
 import AuthGate from "@/components/AuthGate"
+import {
+  excludeTravelRenderMeasurement,
+  finishTravelMeasurement,
+  markFinalTravelResponseRendered,
+  markFirstUsefulTravelCard,
+  setTravelBackendTimingId,
+  startTravelMeasurement,
+} from "@/utils/travelLatency"
 
 export type { ChatHistoryItem } from "@/stores/chatDisplay"
 const CHAT_HISTORY_KEY = "travel_chat_history"
 const ignoreAnimationReply = () => {}
 const emptyMessages: ChatHistoryItem["messages"] = []
+const hasUsefulTravelResult = (
+  result: ReturnType<typeof parseTravelResult> | undefined,
+) => {
+  if (!result) return false
+  if (result.kind === "airport_comparison")
+    return (result.airport_alternatives?.length ?? 0) > 0
+  if (result.kind === "date_comparison")
+    return (result.date_alternatives?.length ?? 0) > 0
+  return (
+    result.flights.length + result.hotels.length + result.activities.length > 0
+  )
+}
+const invalidateAttemptRender = (attempt: {
+  id: string
+  renderEligible: boolean
+}) => {
+  attempt.renderEligible = false
+  excludeTravelRenderMeasurement(attempt.id)
+}
 
 async function persistBrowserState(key: string, value: unknown) {
   localStorage.setItem(key, JSON.stringify(value))
@@ -50,6 +79,13 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const { streamMessage, cancelStream, deleteConversation } = useAgentAPI()
   const activeChatRef = useRef<string | null>(null)
   const requests = useRef(new ChatRequests())
+  const latencyAttempt = useRef<{
+    id: string
+    chatId: string
+    token: ChatRequestToken
+    renderEligible: boolean
+  } | null>(null)
+  const latencyMeasurementsByToken = useRef(new Map<ChatRequestToken, string>())
   const [historyError, setHistoryError] = useState("")
   const [selectedPattern, setSelectedPattern] = useState<PatternType>(
     PATTERNS.TRAVEL_SEARCH,
@@ -78,6 +114,96 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const partialResult = view.phase === "pending" ? view.partial : null
   const streamText = view.phase === "pending" ? view.text : ""
   const animationToken = view.phase === "pending" ? view.token : null
+
+  useLayoutEffect(() => {
+    const attempt = latencyAttempt.current
+    if (
+      !attempt ||
+      !attempt.renderEligible ||
+      currentChatId !== attempt.chatId ||
+      view.phase !== "pending" ||
+      !hasUsefulTravelResult(view.partial)
+    )
+      return
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState !== "visible"
+    )
+      return
+    let secondFrame = 0
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (
+          latencyAttempt.current === attempt &&
+          attempt.renderEligible &&
+          document.visibilityState === "visible" &&
+          currentChatId === attempt.chatId &&
+          view.phase === "pending" &&
+          hasUsefulTravelResult(view.partial)
+        )
+          markFirstUsefulTravelCard(attempt.id)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+    }
+  }, [currentChatId, view])
+
+  useLayoutEffect(() => {
+    const attempt = latencyAttempt.current
+    const lastMessage = conversationMessages.at(-1)
+    if (
+      !attempt ||
+      !attempt.renderEligible ||
+      currentChatId !== attempt.chatId ||
+      view.phase !== "succeeded" ||
+      !lastMessage ||
+      lastMessage.role !== "assistant"
+    )
+      return
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState !== "visible"
+    )
+      return
+    let secondFrame = 0
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (
+          latencyAttempt.current !== attempt ||
+          !attempt.renderEligible ||
+          document.visibilityState !== "visible" ||
+          currentChatId !== attempt.chatId ||
+          view.phase !== "succeeded"
+        )
+          return
+        if (hasUsefulTravelResult(lastMessage.travel_result))
+          markFirstUsefulTravelCard(attempt.id)
+        markFinalTravelResponseRendered(attempt.id)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+    }
+  }, [conversationMessages, currentChatId, view.phase])
+
+  useEffect(() => {
+    const pendingMeasurements = latencyMeasurementsByToken.current
+    const invalidateHiddenAttempt = () => {
+      if (document.visibilityState === "hidden" && latencyAttempt.current)
+        invalidateAttemptRender(latencyAttempt.current)
+    }
+    document.addEventListener("visibilitychange", invalidateHiddenAttempt)
+    return () => {
+      document.removeEventListener("visibilitychange", invalidateHiddenAttempt)
+      pendingMeasurements.forEach((id) =>
+        finishTravelMeasurement(id, "cancelled"),
+      )
+      pendingMeasurements.clear()
+    }
+  }, [])
   const setButtonClicked = useCallback(
     (clicked: boolean) => {
       if (!clicked && animationToken)
@@ -134,6 +260,14 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
     const conversationId = existingChat?.conversationId || crypto.randomUUID()
     const token = requests.current.start(chatId, conversationId)
     if (!token) return
+    const measurementId = startTravelMeasurement()
+    latencyAttempt.current = {
+      id: measurementId,
+      chatId,
+      token,
+      renderEligible: true,
+    }
+    latencyMeasurementsByToken.current.set(token, measurementId)
     const requestId =
       recover &&
       existingChat?.conversationId &&
@@ -179,16 +313,30 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
           }
         },
         requestId,
+        (timingId) => setTravelBackendTimingId(measurementId, timingId),
       )
     } catch (error) {
       failed = true
+      finishTravelMeasurement(
+        measurementId,
+        error instanceof Error && error.name === "AbortError"
+          ? "cancelled"
+          : "error",
+      )
+      latencyMeasurementsByToken.current.delete(token)
       recoverable = error instanceof TravelStreamError && error.retryable
       logger.apiError("/agent/prompt", error)
       response = {
         response: error instanceof Error ? error.message : String(error),
       }
     }
-    if (!requests.current.finish(token, failed ? "failed" : "succeeded")) return
+    if (!requests.current.finish(token, failed ? "failed" : "succeeded")) {
+      finishTravelMeasurement(measurementId, "cancelled")
+      latencyMeasurementsByToken.current.delete(token)
+      return
+    }
+    finishTravelMeasurement(measurementId, failed ? "error" : "success")
+    latencyMeasurementsByToken.current.delete(token)
     if (recoverable) {
       dispatch({ type: "interrupt", token, message: response.response })
       return
@@ -210,6 +358,11 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const stopChat = (chatId: string) => {
     const token = requests.current.stop(chatId)
     if (!token) return
+    const measurementId = latencyMeasurementsByToken.current.get(token)
+    if (measurementId) {
+      finishTravelMeasurement(measurementId, "cancelled")
+      latencyMeasurementsByToken.current.delete(token)
+    }
     cancelStream(token.conversationId)
     dispatch({ type: "stop", token })
   }
@@ -217,6 +370,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
     if (activeChatRef.current) stopChat(activeChatRef.current)
   }
   const handleClearConversation = () => {
+    if (latencyAttempt.current) invalidateAttemptRender(latencyAttempt.current)
     activeChatRef.current = null
     setHistoryError("")
     setMessages([])
@@ -226,6 +380,8 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const handleSelectChat = (chatId: string) => {
     const chat = chatHistory.find((item) => item.id === chatId)
     if (!chat) return
+    if (latencyAttempt.current && latencyAttempt.current.chatId !== chatId)
+      invalidateAttemptRender(latencyAttempt.current)
     activeChatRef.current = chatId
     setCurrentChatId(chatId)
     setHistoryError(

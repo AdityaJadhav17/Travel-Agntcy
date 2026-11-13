@@ -30,6 +30,12 @@ class TravelTimingMiddleware:
             nonlocal status, first_body_ms
             if message["type"] == "http.response.start":
                 status = message["status"]
+                # A server-generated opaque ID joins browser and backend timings.
+                # Never trust a caller-provided identifier as log content.
+                headers = [(key, value) for key, value in message.get("headers", [])
+                           if key.lower() != b"x-travel-timing-id"]
+                headers.append((b"x-travel-timing-id", current_request_id().encode("ascii")))
+                message = {**message, "headers": headers}
             if message["type"] == "http.response.body" and message.get("body") and first_body_ms is None:
                 first_body_ms = round((time.perf_counter() - started) * 1000, 3)
             await send(message)
