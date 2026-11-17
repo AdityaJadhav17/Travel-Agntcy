@@ -5,7 +5,7 @@
 
 import React, { useState, useRef, useEffect } from "react"
 import { Message } from "@/types/message"
-import { ArrowUp } from "lucide-react"
+import { ArrowUp, Square } from "lucide-react"
 import CoffeePromptsDropdown from "./Prompts/CoffeePromptsDropdown"
 import { useAgentAPI } from "@/hooks/useAgentAPI"
 
@@ -39,6 +39,7 @@ interface ChatAreaProps {
   agentResponse?: ApiResponse
   executionKey?: string
   isAgentLoading?: boolean
+  onStop?: () => void
   apiError: boolean
   chatRef?: React.RefObject<HTMLDivElement | null>
   auctionState?: any
@@ -58,6 +59,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onUserInput,
   onApiResponse,
   isAgentLoading,
+  onStop,
   chatRef,
 }) => {
   const [content, setContent] = useState<string>("")
@@ -175,7 +177,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             <textarea
               aria-label="Message Travel AGNTCY"
               ref={textareaRef}
-              className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 py-3.5 pr-14 text-[15px] leading-6 text-gray-100 outline-hidden placeholder:text-gray-500"
+              className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 py-3.5 pr-16 text-[15px] leading-6 text-gray-100 outline-hidden placeholder:text-gray-500"
               placeholder="Message Travel AGNTCY..."
               value={content}
               onChange={(e) => setContent(e.target.value)}
@@ -185,22 +187,37 @@ const ChatArea: React.FC<ChatAreaProps> = ({
             />
 
             {/* Send button */}
-            <div className="absolute right-3 bottom-2.5">
+            <div className="absolute right-1 bottom-1">
               <button
-                aria-label="Send message"
+                type="button"
+                aria-label={onStop ? "Stop" : "Send message"}
+                title={onStop ? "Stop search" : "Send message"}
                 onClick={() => {
-                  if (content.trim() && !isDisabled) {
+                  if (onStop) {
+                    onStop()
+                  } else if (content.trim() && !isDisabled) {
                     processMessage()
                   }
                 }}
-                disabled={!content.trim() || isDisabled}
-                className={`flex h-8 w-8 items-center justify-center rounded-lg transition-all ${
-                  content.trim() && !isDisabled
+                disabled={!onStop && (!content.trim() || isDisabled)}
+                className={`flex size-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 motion-reduce:transition-none ${
+                  onStop || (content.trim() && !isDisabled)
                     ? "bg-white text-black hover:bg-gray-200"
                     : "cursor-not-allowed bg-[#424242] text-gray-500"
                 }`}
               >
-                <ArrowUp className="h-5 w-5" strokeWidth={2.5} />
+                {onStop ? (
+                  <Square
+                    aria-hidden="true"
+                    className="size-3.5 fill-current"
+                  />
+                ) : (
+                  <ArrowUp
+                    aria-hidden="true"
+                    className="size-5"
+                    strokeWidth={2.5}
+                  />
+                )}
               </button>
             </div>
           </div>

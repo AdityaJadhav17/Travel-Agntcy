@@ -4,6 +4,7 @@ export type TravelLatencyOutcome = "success" | "error" | "cancelled"
 export interface TravelLatencyMeasurement {
   measurementId: string
   backendTimingId?: string
+  firstOutboundPreviewMs?: number
   firstUsefulCardMs?: number
   finalResponseRenderedMs?: number
   terminalReceivedMs?: number
@@ -54,6 +55,7 @@ function exposeDiagnostics() {
     summary: () => {
       const summarize = (
         key:
+          | "firstOutboundPreviewMs"
           | "firstUsefulCardMs"
           | "finalResponseRenderedMs"
           | "terminalReceivedMs",
@@ -81,6 +83,7 @@ function exposeDiagnostics() {
         }
       }
       return {
+        firstOutboundPreviewMs: summarize("firstOutboundPreviewMs"),
         firstUsefulCardMs: summarize("firstUsefulCardMs"),
         finalResponseRenderedMs: summarize("finalResponseRenderedMs"),
         terminalReceivedMs: summarize("terminalReceivedMs"),
@@ -127,6 +130,14 @@ export function markFirstUsefulTravelCard(id: string) {
   update(id, (item) => {
     if (item.publicRecord.firstUsefulCardMs === undefined)
       item.publicRecord.firstUsefulCardMs = performance.now() - item.startedAt
+  })
+}
+
+export function markFirstOutboundPreview(id: string) {
+  update(id, (item) => {
+    if (item.publicRecord.firstOutboundPreviewMs === undefined)
+      item.publicRecord.firstOutboundPreviewMs =
+        performance.now() - item.startedAt
   })
 }
 

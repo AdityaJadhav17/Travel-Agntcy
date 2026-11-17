@@ -30,6 +30,7 @@ from agents.flight.card import AGENT_CARD as FLIGHT_AGENT_CARD
 from agents.hotel.card import AGENT_CARD as HOTEL_AGENT_CARD
 from agents.activity.card import AGENT_CARD as ACTIVITY_AGENT_CARD
 from agents.supervisors.travel.graph.shared import get_factory
+from agents.supervisors.travel.graph.flight_preview import FlightPreviewError, fetch_flight_preview, preview_enabled
 from config.config import (
     DEFAULT_MESSAGE_TRANSPORT,
     TRANSPORT_SERVER_ENDPOINT,
@@ -37,7 +38,7 @@ from config.config import (
 )
 from agents.travel.travel_logic import find_cheapest_plan
 from agents.travel.party import TravelParty
-from common.travel_timing import timed
+from common.travel_timing import current_request_id, timed
 
 logger = logging.getLogger("lungo.travel.supervisor.tools")
 
@@ -101,6 +102,7 @@ async def _send_a2a_message(agent_card, message: str) -> str:
                 message=Message(
                     messageId=str(uuid4()),
                     role=Role.user,
+                    metadata={"travel_timing_id": current_request_id() or uuid4().hex},
                     parts=[Part(TextPart(text=message))],
                 ),
             )
@@ -149,6 +151,8 @@ async def _search_flights_internal(
     return_date: str = None,
     is_one_way: bool = False,
     party: TravelParty | None = None,
+    *,
+    allow_preview: bool = False,
 ) -> str:
     """
     Internal function to search for flights using the Flight Search Agent via A2A.
@@ -182,9 +186,11 @@ async def _search_flights_internal(
     
     message += " party:" + party.model_dump_json()
     try:
+        if allow_preview and not is_one_way and return_date and preview_enabled():
+            return await fetch_flight_preview(f"{FLIGHT_AGENT_CARD.url.rstrip('/')}/internal/flight-preview", message)
         result = await _send_a2a_message(FLIGHT_AGENT_CARD, message)
         return result
-    except A2AAgentError as e:
+    except (A2AAgentError, FlightPreviewError) as e:
         logger.error(f"Flight search A2A error: {e}")
         return json.dumps({"status": "error", "message": str(e)})
 
@@ -275,6 +281,8 @@ async def get_flights_via_a2a(
     return_date: str = None,
     is_one_way: bool = False,
     party: TravelParty | None = None,
+    *,
+    allow_preview: bool = False,
 ) -> list:
     """
     Get flights via A2A and parse the response.
@@ -294,7 +302,8 @@ async def get_flights_via_a2a(
     """
     # Use the internal function (not the @tool decorated version)
     result_json = await _search_flights_internal(
-        origin, destination, outbound_date, return_date, is_one_way, party=party
+        origin, destination, outbound_date, return_date, is_one_way, party=party,
+        **({"allow_preview": True} if allow_preview else {}),
     )
     
     try:
