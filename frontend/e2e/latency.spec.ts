@@ -171,6 +171,84 @@ async function submit(page: Page, text = prompt) {
   await expect(page.getByRole("status")).toHaveText("Searching fixture")
 }
 
+test("flight cards expose the fare tradeoff and both travel days on a narrow screen", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  const returnFlight = {
+    airline: "Return Fixture Air",
+    departure_time: "2026-12-12 22:30",
+    arrival_time: "2026-12-13 01:10",
+    stops: 0,
+  }
+  const options = [
+    {
+      ...flightResult.flights[0],
+      id: "lowest",
+      airline: "Connection Air",
+      total_usd: 240,
+      stops: 1,
+      return_flight: returnFlight,
+    },
+    {
+      ...flightResult.flights[0],
+      id: "nonstop",
+      airline: "Nonstop Air",
+      total_usd: 275,
+      departure_time: "07:00",
+      return_flight: returnFlight,
+    },
+    {
+      ...flightResult.flights[0],
+      id: "incomplete",
+      airline: "Incomplete Air",
+      total_usd: 99,
+      return_flight: null,
+    },
+  ]
+  await emit(page, {
+    type: "done",
+    result: {
+      response: "Three flight options.",
+      travel_result: { ...flightResult, flights: options },
+    },
+  })
+  const results = page.getByRole("region", { name: "Travel results" })
+  await expect(
+    results.getByText(
+      "Fares start at $240 round-trip, with a nonstop outbound for $35 more.",
+    ),
+  ).toBeInViewport()
+  const cards = results.getByRole("article")
+  await expect(cards).toHaveCount(3)
+  await expect(cards.nth(0)).toContainText("$240")
+  await expect(cards.nth(1)).toContainText("7:00 AM")
+  await expect(cards.nth(1)).toContainText("Dec 13")
+  await expect(cards.nth(2)).toContainText("Return details unavailable")
+  await expect(cards.nth(2)).not.toContainText("Round trip")
+  await expect(
+    results.getByText("Quoted flight + full hotel stay", { exact: false }),
+  ).toHaveCount(0)
+  expect(await results.evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(
+    Math.ceil((await results.boundingBox())!.width),
+  )
+  const notes = page.getByText("Travel notes", { exact: true })
+  await expect(
+    page.getByText("Three flight options.", { exact: true }),
+  ).toBeHidden()
+  await testInfo.attach("390px flight comparison", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  })
+  await notes.click()
+  await expect(
+    page.getByText("Three flight options.", { exact: true }),
+  ).toBeVisible()
+})
+
 test("narrow search acknowledges Send immediately and keeps Stop fixed through preview", async ({
   page,
 }) => {
@@ -343,8 +421,10 @@ test("outbound preview renders while return is pending and yields to verified fl
 
   await emit(page, previewEvent)
   await expect(preview).toBeVisible()
-  await expect(preview).toContainText("Still searching for return flights.")
-  await expect(preview).toContainText("08:00 → 16:00 · 1 stop")
+  await expect(preview).toContainText("Return details and fare pending")
+  await expect(preview.getByText("8:00 AM", { exact: true })).toBeVisible()
+  await expect(preview.getByText("4:00 PM", { exact: true })).toBeVisible()
+  await expect(preview.getByText("1 stop", { exact: true })).toBeVisible()
   await expect(preview).not.toContainText("123")
   await expect(preview).not.toContainText("hidden-fixture-token")
   await expect(preview.getByRole("button")).toHaveCount(0)
@@ -379,7 +459,7 @@ test("outbound preview renders while return is pending and yields to verified fl
     component: "flights",
     travel_result: roundTrip,
   })
-  await expect(cards).toContainText("Return: Fixture Return Air")
+  await expect(cards).toContainText("Return · Fixture Return Air")
   await expect(preview).toHaveCount(0)
   await waitForMeasurement(
     page,
@@ -390,7 +470,7 @@ test("outbound preview renders while return is pending and yields to verified fl
     type: "done",
     result: { response: "Round trip confirmed.", travel_result: roundTrip },
   })
-  await expect(cards).toContainText("Return: Fixture Return Air")
+  await expect(cards).toContainText("Return · Fixture Return Air")
   await expect(
     page.getByRole("button", { name: "Stop", exact: true }),
   ).toHaveCount(0)
@@ -528,7 +608,7 @@ test("a stream that finishes in a background chat never gets render timings on r
     .click()
   await expect(
     page.getByText("Background flight done.", { exact: true }),
-  ).toBeVisible()
+  ).toBeHidden()
   await expect(
     page.getByRole("region", { name: "Travel results" }).getByRole("heading", {
       name: "Timing Fixture Air",

@@ -1,4 +1,6 @@
 import type { TravelResult } from "@/types/travelResult"
+import FlightOptionCard from "./FlightOptionCard"
+import { flightStops as stops, formatFare } from "@/utils/flightDisplay"
 
 const usd = (value: number | null) =>
   value === null
@@ -8,8 +10,25 @@ const usd = (value: number | null) =>
         currency: "USD",
       }).format(value)
 
-const stops = (count: number) =>
-  count === 0 ? "Nonstop" : `${count} stop${count === 1 ? "" : "s"}`
+function flightSummary(result: TravelResult) {
+  if (result.kind !== "flight_only") return null
+  const comparable = result.flights.flatMap((flight) =>
+    flight.total_usd !== null && (result.is_one_way || flight.return_flight)
+      ? [{ fare: flight.total_usd, stops: flight.stops }]
+      : [],
+  )
+  if (comparable.length < 2) return null
+  const lowest = Math.min(...comparable.map((flight) => flight.fare))
+  const nonstop = comparable.filter((flight) => flight.stops === 0)
+  const scope = result.is_one_way ? "one-way" : "round-trip"
+  if (!nonstop.length)
+    return `The lowest listed ${scope} fare is ${formatFare(lowest)}.`
+  const premium = Math.min(...nonstop.map((flight) => flight.fare)) - lowest
+  const leg = result.is_one_way ? "flight" : "outbound"
+  if (premium < 0.005)
+    return `A nonstop ${leg} is available at the lowest listed ${scope} fare of ${formatFare(lowest)}.`
+  return `Fares start at ${formatFare(lowest)} ${scope}, with a nonstop ${leg} for ${formatFare(premium)} more.`
+}
 
 const accommodationReasonLabels: Record<string, string> = {
   known_hostel_excluded:
@@ -60,29 +79,42 @@ export default function StructuredTravelResultCard({
     airport_comparison: "Nearby arrival airports",
     date_comparison: "Nearby travel dates",
   }[result.kind]
+  const summary = flightSummary(result)
 
   return (
     <section aria-label="Travel results" className="space-y-4">
-      <header className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-4">
-        <h3 className="text-lg font-semibold text-white">{heading}</h3>
+      <header
+        className={
+          result.kind === "flight_only"
+            ? "space-y-1"
+            : "rounded-xl border border-emerald-400/30 bg-emerald-400/10 p-4"
+        }
+      >
+        <h3 className="text-lg font-semibold tracking-tight text-white">
+          {heading}
+        </h3>
         <p className="text-sm text-gray-300">
           {[result.origin, result.destination].filter(Boolean).join(" → ")}
           {result.start_date && ` · ${result.start_date}`}
           {result.end_date && ` to ${result.end_date}`}
         </p>
         <p className="text-sm text-gray-300">
-          {result.adults} adult{result.adults === 1 ? "" : "s"},{" "}
-          {result.children} child{result.children === 1 ? "" : "ren"}
+          {result.adults} adult{result.adults === 1 ? "" : "s"}
+          {(result.kind !== "flight_only" || result.children > 0) &&
+            `, ${result.children} ${result.children === 1 ? "child" : "children"}`}
           {result.kind !== "flight_only" &&
             result.kind !== "activity_only" &&
             ` · ${result.rooms} room${result.rooms === 1 ? "" : "s"}`}
         </p>
-        {result.total_usd !== null && (
+        {result.kind === "full_trip" && result.total_usd !== null && (
           <p className="mt-2 font-semibold text-emerald-200">
             Quoted flight + full hotel stay: {usd(result.total_usd)}
           </p>
         )}
       </header>
+      {summary && (
+        <p className="text-sm leading-relaxed text-gray-200">{summary}</p>
+      )}
       {result.notice && (
         <p className="rounded-xl border border-blue-500/40 bg-blue-500/10 p-4 text-sm text-blue-100">
           {result.notice}
@@ -90,33 +122,20 @@ export default function StructuredTravelResultCard({
       )}
       {result.flights.length > 0 && (
         <div className="space-y-2">
-          <h4 className="font-semibold text-white">Flights</h4>
+          {result.kind !== "flight_only" && (
+            <h4 className="font-semibold text-white">Flights</h4>
+          )}
           {result.flights.map((flight) => (
-            <article
+            <FlightOptionCard
               key={flight.id}
-              className="rounded-xl border border-gray-700 bg-[#252525] p-4"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <h5 className="font-semibold text-white">{flight.airline}</h5>
-                <p className="font-semibold text-emerald-200">
-                  {flight.total_usd === null
-                    ? "Price unavailable"
-                    : `${usd(flight.total_usd)} fare`}
-                </p>
-              </div>
-              <p className="text-sm text-gray-300">
-                Outbound: {flight.departure_time} → {flight.arrival_time} ·{" "}
-                {stops(flight.stops)}
-              </p>
-              {flight.return_flight && (
-                <p className="text-sm text-gray-300">
-                  Return: {flight.return_flight.airline} ·{" "}
-                  {flight.return_flight.departure_time} →{" "}
-                  {flight.return_flight.arrival_time} ·{" "}
-                  {stops(flight.return_flight.stops)}
-                </p>
-              )}
-            </article>
+              leg={flight}
+              quote={{
+                state: "complete",
+                fare: flight.total_usd,
+                oneWay: result.is_one_way,
+                returned: flight.return_flight,
+              }}
+            />
           ))}
         </div>
       )}
