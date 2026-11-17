@@ -29,6 +29,7 @@ the browser's monotonic `performance.now()` clock:
 
 | Field | Meaning |
 | --- | --- |
+| `firstOutboundPreviewMs` | First provisional outbound options given a browser rendering opportunity when the optional preview is enabled |
 | `firstUsefulCardMs` | First nonempty structured travel result committed and given a browser rendering opportunity |
 | `finalResponseRenderedMs` | Successful final response committed and given a browser rendering opportunity, including clarification text |
 | `terminalReceivedMs` | Successful terminal result consumed by the client; **not** network EOF |
@@ -60,9 +61,11 @@ the app reuses its request ID for safe recovery.
 
 To investigate a slow run, match `backendTimingId` to `request_id` in the
 supervisor's `travel_request_timing` and `travel_timing` log records. These show
-total API time, first bytes, model stages and A2A round trips. Provider processes
-do not yet propagate that ID; this is not a distributed trace. Browser durations
-and server durations have different start boundaries and must not be added.
+total API time, first bytes, model stages and A2A round trips. Search the same
+ID in `flight-agent`, `hotel-agent` and `activity-agent` timing logs to find
+provider calls. Concurrent return lookups overlap, so compare their longest
+duration against the elapsed flight-agent stage. Browser and server durations
+have different start boundaries.
 
 ## Validation — 2026-11-13
 

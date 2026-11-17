@@ -1070,6 +1070,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
                 party=params,
+                allow_preview=True,
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
             summary = None
@@ -1236,6 +1237,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
                 party=params,
+                allow_preview=True,
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
             if not flights:

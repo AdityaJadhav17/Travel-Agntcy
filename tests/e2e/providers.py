@@ -1,6 +1,7 @@
 """Deterministic HTTP substitute for SerpAPI, only in the isolated CI stack."""
 
 from datetime import date
+from threading import Event
 import time
 
 from fastapi import FastAPI, Request, HTTPException
@@ -8,6 +9,19 @@ from fastapi import FastAPI, Request, HTTPException
 app = FastAPI()
 transient_queries = set()
 request_counts = {"google_flights": 0, "google_hotels": 0, "other": 0}
+preview_return_gate = Event()
+preview_return_gate.set()
+
+
+@app.post("/__eval/preview-return/{action}")
+def configure_preview_gate(action: str):
+    if action == "hold":
+        preview_return_gate.clear()
+    elif action == "release":
+        preview_return_gate.set()
+    else:
+        raise HTTPException(404)
+    return {"released": preview_return_gate.is_set()}
 
 
 @app.get("/health")
@@ -38,6 +52,8 @@ def search(request: Request):
         adults, children = int(params["adults"]), int(params["children"])
         inbound = bool(params.get("departure_token"))
         origin, destination = params["departure_id"], params["arrival_id"]
+        if inbound and destination == "JFK" and not preview_return_gate.wait(timeout=10):
+            raise HTTPException(504, "Fixture return gate was never released")
         day = params["return_date"] if inbound else params["outbound_date"]
         if inbound:
             origin, destination = destination, origin

@@ -24,6 +24,7 @@ import { Message } from "./types/message"
 import { PATTERNS, PatternType } from "@/utils/patternUtils"
 import TravelResponseCard from "@/components/Chat/TravelResponseCard"
 import StructuredTravelResultCard from "@/components/Chat/StructuredTravelResultCard"
+import OutboundPreviewCard from "@/components/Chat/OutboundPreviewCard"
 import { parseTravelResult } from "@/types/travelResult"
 import { Plane } from "lucide-react"
 import { ChatRequests } from "@/stores/chatRequests"
@@ -41,6 +42,7 @@ import {
   finishTravelMeasurement,
   markFinalTravelResponseRendered,
   markFirstUsefulTravelCard,
+  markFirstOutboundPreview,
   setTravelBackendTimingId,
   startTravelMeasurement,
 } from "@/utils/travelLatency"
@@ -90,7 +92,10 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const [selectedPattern, setSelectedPattern] = useState<PatternType>(
     PATTERNS.TRAVEL_SEARCH,
   )
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [isSidebarOpen, setIsSidebarOpen] = useState(
+    () => window.matchMedia("(min-width: 768px)").matches,
+  )
+  const [showAgentActivity, setShowAgentActivity] = useState(false)
   const [currentChatId, setCurrentChatId] = useState<string | null>(null)
   const [display, dispatch] = useReducer(chatDisplayReducer, undefined, () => {
     try {
@@ -110,10 +115,46 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const isAgentLoading = view.phase === "pending"
   const buttonClicked = view.phase === "pending" && view.animate
   const aiReplied = view.phase === "succeeded" || view.phase === "failed"
-  const progressStatus = view.phase === "pending" ? view.status : ""
   const partialResult = view.phase === "pending" ? view.partial : null
+  const outboundPreview = view.phase === "pending" ? view.outboundPreview : null
+  const progressStatus =
+    view.phase !== "pending"
+      ? ""
+      : outboundPreview
+        ? "Checking return options"
+        : view.status === "Starting search"
+          ? "Reading your trip details"
+          : view.status
   const streamText = view.phase === "pending" ? view.text : ""
   const animationToken = view.phase === "pending" ? view.token : null
+
+  useLayoutEffect(() => {
+    const attempt = latencyAttempt.current
+    if (
+      !outboundPreview ||
+      !attempt ||
+      !attempt.renderEligible ||
+      currentChatId !== attempt.chatId ||
+      animationToken !== attempt.token ||
+      document.visibilityState !== "visible"
+    )
+      return
+    let secondFrame = 0
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (
+          latencyAttempt.current === attempt &&
+          attempt.renderEligible &&
+          document.visibilityState === "visible"
+        )
+          markFirstOutboundPreview(attempt.id)
+      })
+    })
+    return () => {
+      cancelAnimationFrame(firstFrame)
+      if (secondFrame) cancelAnimationFrame(secondFrame)
+    }
+  }, [animationToken, currentChatId, outboundPreview])
 
   useLayoutEffect(() => {
     const attempt = latencyAttempt.current
@@ -212,10 +253,18 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
     [animationToken],
   )
 
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [conversationMessages, isAgentLoading])
+  const conversationScrollRef = useRef<HTMLDivElement>(null)
+  const previousChatId = useRef(currentChatId)
+  useLayoutEffect(() => {
+    const switchedChat = previousChatId.current !== currentChatId
+    previousChatId.current = currentChatId
+    const scroller = conversationScrollRef.current
+    // Explicit navigation and Send reveal the latest turn. Stream updates
+    // leave the reader in place, with normal browser scroll anchoring.
+    if (scroller && (switchedChat || animationToken)) {
+      scroller.scrollTop = scroller.scrollHeight
+    }
+  }, [currentChatId, animationToken])
 
   useEffect(() => {
     void persistBrowserState(CHAT_HISTORY_KEY, chatHistory).catch(() => {
@@ -260,6 +309,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
     const conversationId = existingChat?.conversationId || crypto.randomUUID()
     const token = requests.current.start(chatId, conversationId)
     if (!token) return
+    setShowAgentActivity(false)
     const measurementId = startTravelMeasurement()
     latencyAttempt.current = {
       id: measurementId,
@@ -301,7 +351,13 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
         (event) => {
           if (!requests.current.isCurrent(token)) return
           if (event.type === "status" || event.type === "error") {
-            dispatch({ type: "status", token, message: event.message })
+            dispatch({ type: event.type, token, message: event.message })
+          } else if (event.type === "outbound_preview") {
+            dispatch({
+              type: "outbound_preview",
+              token,
+              flights: event.flights,
+            })
           } else if (event.type === "result") {
             dispatch({
               type: "partial",
@@ -376,7 +432,10 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
     setMessages([])
     setCurrentChatId(null)
   }
-  const handleNewChat = handleClearConversation
+  const handleNewChat = () => {
+    handleClearConversation()
+    if (window.matchMedia("(max-width: 767px)").matches) setIsSidebarOpen(false)
+  }
   const handleSelectChat = (chatId: string) => {
     const chat = chatHistory.find((item) => item.id === chatId)
     if (!chat) return
@@ -384,6 +443,8 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
       invalidateAttemptRender(latencyAttempt.current)
     activeChatRef.current = chatId
     setCurrentChatId(chatId)
+    setShowAgentActivity(false)
+    if (window.matchMedia("(max-width: 767px)").matches) setIsSidebarOpen(false)
     setHistoryError(
       chat.conversationId
         ? ""
@@ -413,25 +474,27 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
 
   return (
     <ThemeProvider>
-      <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#212121]">
+      <div className="flex h-dvh w-full flex-col overflow-hidden bg-[#212121]">
         <Navigation
           onToggleSidebar={handleToggleSidebar}
           isSidebarOpen={isSidebarOpen}
           onLogout={onLogout}
         />
-        <div className="flex flex-1 overflow-hidden">
-          <Sidebar
-            selectedPattern={selectedPattern}
-            onPatternChange={handlePatternChange}
-            onNewChat={handleNewChat}
-            onSelectChat={handleSelectChat}
-            onDeleteChat={handleDeleteChat}
-            chatHistory={chatHistory}
-            currentChatId={currentChatId}
-            isOpen={isSidebarOpen}
-          />
+        <div className="relative flex flex-1 overflow-hidden">
+          <div className="absolute inset-y-0 left-0 z-20 md:relative">
+            <Sidebar
+              selectedPattern={selectedPattern}
+              onPatternChange={handlePatternChange}
+              onNewChat={handleNewChat}
+              onSelectChat={handleSelectChat}
+              onDeleteChat={handleDeleteChat}
+              chatHistory={chatHistory}
+              currentChatId={currentChatId}
+              isOpen={isSidebarOpen}
+            />
+          </div>
           <div
-            className={`flex flex-1 flex-col bg-[#212121] ${isSidebarOpen ? "border-l border-gray-800" : ""}`}
+            className={`flex min-w-0 flex-1 flex-col bg-[#212121] ${isSidebarOpen ? "md:border-l md:border-gray-800" : ""}`}
           >
             {historyError && (
               <p role="status" className="px-4 py-2 text-sm text-amber-200">
@@ -439,7 +502,12 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
               </p>
             )}
             {/* Main content area - scrollable */}
-            <div className="relative flex-1 overflow-y-auto">
+            <div
+              ref={conversationScrollRef}
+              role="region"
+              aria-label="Conversation"
+              className="relative flex-1 overflow-y-auto"
+            >
               {/* New Chat Welcome View - Graph + Welcome Section */}
               {showWelcome && (
                 <div className="flex h-full flex-col">
@@ -477,23 +545,6 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                       adventure
                     </p>
                   </div>
-                </div>
-              )}
-
-              {/* Loading State with Graph - when messages exist but loading */}
-              {!showWelcome && isAgentLoading && (
-                <div className="h-[350px]">
-                  <MainArea
-                    pattern={selectedPattern}
-                    buttonClicked={buttonClicked}
-                    setButtonClicked={setButtonClicked}
-                    aiReplied={aiReplied}
-                    setAiReplied={ignoreAnimationReply}
-                    chatHeight={chatHeightValue}
-                    isExpanded={isExpanded}
-                    groupCommResponseReceived={false}
-                    onNodeHighlight={() => {}}
-                  />
                 </div>
               )}
 
@@ -624,12 +675,15 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                       >
                         <Plane className="h-4 w-4 text-white" />
                       </div>
-                      <div className="flex-1 space-y-3 pt-1">
+                      <div className="min-w-0 flex-1 space-y-3 pt-1">
                         <p role="status" className="text-sm text-emerald-200">
                           {progressStatus || "Working on your trip"}
                         </p>
                         {partialResult && (
                           <StructuredTravelResultCard result={partialResult} />
+                        )}
+                        {outboundPreview && (
+                          <OutboundPreviewCard flights={outboundPreview} />
                         )}
                         {streamText && (
                           <p className="text-sm whitespace-pre-wrap text-gray-300">
@@ -638,16 +692,38 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                         )}
                         <button
                           type="button"
-                          onClick={handleStop}
-                          className="rounded-lg border border-gray-500 px-3 py-1.5 text-sm text-gray-200 hover:bg-gray-700"
+                          aria-expanded={showAgentActivity}
+                          aria-controls="pending-agent-activity"
+                          onClick={() => setShowAgentActivity((open) => !open)}
+                          className="min-h-11 rounded-md px-2 text-sm text-gray-300 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-emerald-300"
                         >
-                          Stop
+                          {showAgentActivity
+                            ? "Hide agent graph"
+                            : "Show agent graph"}
                         </button>
+                        <div
+                          id="pending-agent-activity"
+                          hidden={!showAgentActivity}
+                        >
+                          {showAgentActivity && (
+                            <div className="h-64">
+                              <MainArea
+                                pattern={selectedPattern}
+                                buttonClicked={false}
+                                setButtonClicked={setButtonClicked}
+                                aiReplied={aiReplied}
+                                setAiReplied={ignoreAnimationReply}
+                                chatHeight={chatHeightValue}
+                                isExpanded={isExpanded}
+                                groupCommResponseReceived={false}
+                                onNodeHighlight={() => {}}
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}
-
-                  <div ref={messagesEndRef} />
                 </div>
               )}
             </div>
@@ -681,6 +757,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                 onClearConversation={handleClearConversation}
                 executionKey=""
                 isAgentLoading={isAgentLoading || view.phase === "deleting"}
+                onStop={isAgentLoading ? handleStop : undefined}
                 apiError={view.phase === "failed"}
                 chatRef={chatRef}
                 auctionState={{

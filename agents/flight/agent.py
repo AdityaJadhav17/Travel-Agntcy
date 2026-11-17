@@ -10,15 +10,19 @@ Uses SerpAPI to search for flights and returns formatted results.
 
 import logging
 import json
+from contextvars import ContextVar
 from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.graph.state import CompiledStateGraph
 from ioa_observe.sdk.decorators import agent, graph
 
-from agents.travel.serpapi_tools import search_flights
+from agents.travel.serpapi_tools import OutboundPreviewCallback, search_flights
 from agents.travel.party import party_from_message
 
 logger = logging.getLogger("lungo.flight.agent")
+_outbound_preview: ContextVar[OutboundPreviewCallback | None] = ContextVar(
+    "flight_outbound_preview", default=None
+)
 
 
 @agent(name="flight_search_agent")
@@ -104,6 +108,7 @@ class FlightSearchAgent:
                 return_date=params.get("return_date") or params["outbound_date"],
                 include_return_flights=not is_one_way,  # Don't fetch return flights for one-way
                 party=party_from_message(user_msg.content),
+                on_outbound_preview=_outbound_preview.get(),
             )
             
             
@@ -164,7 +169,9 @@ class FlightSearchAgent:
         
         return json.dumps(response_data)
     
-    async def ainvoke(self, message: str) -> str:
+    async def ainvoke(
+        self, message: str, *, on_outbound_preview: OutboundPreviewCallback | None = None
+    ) -> str:
         """
         Invoke the flight search agent with a message.
         
@@ -174,9 +181,13 @@ class FlightSearchAgent:
         Returns:
             Flight search results as JSON string
         """
-        result = await self.graph.ainvoke({
-            "messages": [HumanMessage(content=message)]
-        })
+        token = _outbound_preview.set(on_outbound_preview)
+        try:
+            result = await self.graph.ainvoke({
+                "messages": [HumanMessage(content=message)]
+            })
+        finally:
+            _outbound_preview.reset(token)
         
         # Get the last AI message
         for msg in reversed(result.get("messages", [])):

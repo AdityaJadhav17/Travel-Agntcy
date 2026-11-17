@@ -32,64 +32,84 @@ const flightResult = {
   notice: "",
 }
 
+const previewEvent = {
+  type: "outbound_preview",
+  flights: [
+    {
+      airline: "Provisional Fixture Air",
+      departure_time: "08:00",
+      arrival_time: "16:00",
+      stops: 1,
+      total_usd: 123,
+      departure_token: "hidden-fixture-token",
+    },
+  ],
+}
+
 /** Provide a controllable streaming response so the card and terminal event
  * can be observed as separate browser milestones without external providers.
  */
-async function controlledTimingStream(page: Page) {
-  await page.addInitScript((header) => {
-    const originalFetch = window.fetch.bind(window)
-    window.fetch = async (input, init) => {
-      if (!String(input).endsWith("/agent/prompt/stream"))
-        return originalFetch(input, init)
-      const requestPrompt = JSON.parse(String(init?.body)).prompt
-      const encoder = new TextEncoder()
-      let listener: ((event: Event) => void) | undefined
-      let abort: (() => void) | undefined
-      const cleanup = () => {
-        if (listener)
-          document.removeEventListener("travel-latency-fixture", listener)
-        if (abort) init?.signal?.removeEventListener("abort", abort)
-      }
-      const body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          listener = (raw) => {
-            const event = (raw as CustomEvent).detail
-            if (event.prompt && event.prompt !== requestPrompt) return
-            if (event.close) {
-              cleanup()
-              controller.close()
-            } else {
-              controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"))
+async function controlledTimingStream(page: Page, holdInitialStatus = false) {
+  await page.addInitScript(
+    ({ header, holdInitialStatus }) => {
+      const originalFetch = window.fetch.bind(window)
+      window.fetch = async (input, init) => {
+        if (String(input).endsWith("/auth/status"))
+          return Response.json({ authenticated: true })
+        if (!String(input).endsWith("/agent/prompt/stream"))
+          return originalFetch(input, init)
+        const requestPrompt = JSON.parse(String(init?.body)).prompt
+        const encoder = new TextEncoder()
+        let listener: ((event: Event) => void) | undefined
+        let abort: (() => void) | undefined
+        const cleanup = () => {
+          if (listener)
+            document.removeEventListener("travel-latency-fixture", listener)
+          if (abort) init?.signal?.removeEventListener("abort", abort)
+        }
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            listener = (raw) => {
+              const event = (raw as CustomEvent).detail
+              if (event.prompt && event.prompt !== requestPrompt) return
+              if (event.close) {
+                cleanup()
+                controller.close()
+              } else {
+                controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"))
+              }
             }
-          }
-          abort = () => {
+            abort = () => {
+              cleanup()
+              controller.error(new DOMException("Aborted", "AbortError"))
+            }
+            document.addEventListener("travel-latency-fixture", listener)
+            init?.signal?.addEventListener("abort", abort)
+            if (!holdInitialStatus)
+              controller.enqueue(
+                encoder.encode(
+                  JSON.stringify({
+                    type: "status",
+                    component: "request",
+                    message: "Searching fixture",
+                  }) + "\n",
+                ),
+              )
+          },
+          cancel() {
             cleanup()
-            controller.error(new DOMException("Aborted", "AbortError"))
-          }
-          document.addEventListener("travel-latency-fixture", listener)
-          init?.signal?.addEventListener("abort", abort)
-          controller.enqueue(
-            encoder.encode(
-              JSON.stringify({
-                type: "status",
-                component: "request",
-                message: "Searching fixture",
-              }) + "\n",
-            ),
-          )
-        },
-        cancel() {
-          cleanup()
-        },
-      })
-      return new Response(body, {
-        headers: {
-          "Content-Type": "application/x-ndjson",
-          [header]: "fixture-timing-id",
-        },
-      })
-    }
-  }, timingHeader)
+          },
+        })
+        return new Response(body, {
+          headers: {
+            "Content-Type": "application/x-ndjson",
+            [header]: "fixture-timing-id",
+          },
+        })
+      }
+    },
+    { header: timingHeader, holdInitialStatus },
+  )
 }
 
 async function emit(
@@ -151,6 +171,178 @@ async function submit(page: Page, text = prompt) {
   await expect(page.getByRole("status")).toHaveText("Searching fixture")
 }
 
+test("flight cards expose the fare tradeoff and both travel days on a narrow screen", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  const returnFlight = {
+    airline: "Return Fixture Air",
+    departure_time: "2026-12-12 22:30",
+    arrival_time: "2026-12-13 01:10",
+    stops: 0,
+  }
+  const options = [
+    {
+      ...flightResult.flights[0],
+      id: "lowest",
+      airline: "Connection Air",
+      total_usd: 240,
+      stops: 1,
+      return_flight: returnFlight,
+    },
+    {
+      ...flightResult.flights[0],
+      id: "nonstop",
+      airline: "Nonstop Air",
+      total_usd: 275,
+      departure_time: "07:00",
+      return_flight: returnFlight,
+    },
+    {
+      ...flightResult.flights[0],
+      id: "incomplete",
+      airline: "Incomplete Air",
+      total_usd: 99,
+      return_flight: null,
+    },
+  ]
+  await emit(page, {
+    type: "done",
+    result: {
+      response: "Three flight options.",
+      travel_result: { ...flightResult, flights: options },
+    },
+  })
+  const results = page.getByRole("region", { name: "Travel results" })
+  await expect(
+    results.getByText(
+      "Fares start at $240 round-trip, with a nonstop outbound for $35 more.",
+    ),
+  ).toBeInViewport()
+  const cards = results.getByRole("article")
+  await expect(cards).toHaveCount(3)
+  await expect(cards.nth(0)).toContainText("$240")
+  await expect(cards.nth(1)).toContainText("7:00 AM")
+  await expect(cards.nth(1)).toContainText("Dec 13")
+  await expect(cards.nth(2)).toContainText("Return details unavailable")
+  await expect(cards.nth(2)).not.toContainText("Round trip")
+  await expect(
+    results.getByText("Quoted flight + full hotel stay", { exact: false }),
+  ).toHaveCount(0)
+  expect(await results.evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(
+    Math.ceil((await results.boundingBox())!.width),
+  )
+  const notes = page.getByText("Travel notes", { exact: true })
+  await expect(
+    page.getByText("Three flight options.", { exact: true }),
+  ).toBeHidden()
+  await testInfo.attach("390px flight comparison", {
+    body: await page.screenshot(),
+    contentType: "image/png",
+  })
+  await notes.click()
+  await expect(
+    page.getByText("Three flight options.", { exact: true }),
+  ).toBeVisible()
+})
+
+test("narrow search acknowledges Send immediately and keeps Stop fixed through preview", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 740 })
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await controlledTimingStream(page, true)
+  await page.goto("/")
+  const input = page.getByRole("textbox", { name: "Message Travel AGNTCY" })
+  await input.fill(prompt)
+  const send = page.getByRole("button", { name: "Send message" })
+  const initial = await send.boundingBox()
+  await send.click()
+  const status = page.getByRole("status")
+  await expect(status).toHaveText("Reading your trip details")
+  await expect(status).toBeInViewport()
+  const showGraph = page.getByRole("button", { name: "Show agent graph" })
+  await expect(showGraph).toHaveAttribute("aria-expanded", "false")
+  await showGraph.click()
+  await expect(
+    page.getByRole("button", { name: "Hide agent graph" }),
+  ).toHaveAttribute("aria-expanded", "true")
+  await page.getByRole("button", { name: "Hide agent graph" }).click()
+  await emit(page, previewEvent)
+  await expect(status).toHaveText("Checking return options")
+  await expect(
+    page.getByRole("region", { name: "Provisional outbound flights" }),
+  ).toBeInViewport()
+  const stop = page.getByRole("button", { name: "Stop", exact: true })
+  await expect(stop).toBeInViewport()
+  const pending = await stop.boundingBox()
+  expect(pending!.width).toBeGreaterThanOrEqual(44)
+  expect(pending!.height).toBeGreaterThanOrEqual(44)
+  expect(pending!.x).toBeCloseTo(initial!.x, 0)
+  expect(pending!.y).toBeCloseTo(initial!.y, 0)
+  await emit(page, {
+    type: "done",
+    result: { response: "Round trip confirmed.", travel_result: flightResult },
+  })
+  await expect(
+    page.getByRole("region", { name: "Travel results" }),
+  ).toBeInViewport()
+  await expect(stop).toHaveCount(0)
+})
+
+test("preview and completion leave earlier messages in view when reading history", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "travel_chat_history",
+      JSON.stringify([
+        {
+          id: "history-fixture",
+          title: "Earlier trip",
+          timestamp: new Date().toISOString(),
+          messages: Array.from({ length: 24 }, (_, index) => ({
+            role: "user",
+            content: `Earlier message ${index + 1}`,
+          })),
+        },
+      ]),
+    )
+  })
+  await page.goto("/")
+  await page.getByRole("button", { name: "Earlier trip", exact: true }).click()
+  await page.getByRole("textbox").fill(prompt)
+  await page.getByRole("textbox").press("Enter")
+  await expect(
+    page.getByText("Searching fixture", { exact: true }),
+  ).toBeVisible()
+  const conversation = page.getByRole("region", {
+    name: "Conversation",
+    exact: true,
+  })
+  await conversation.evaluate((element) => {
+    element.scrollTop = 0
+  })
+  const earlier = page.getByText("Earlier message 1", { exact: true })
+  await expect(earlier).toBeInViewport()
+  await emit(page, previewEvent)
+  await expect(
+    page.getByRole("region", { name: "Provisional outbound flights" }),
+  ).toBeAttached()
+  await emit(page, {
+    type: "done",
+    result: { response: "Finished.", travel_result: flightResult },
+  })
+  await expect(
+    page.getByRole("region", { name: "Travel results" }),
+  ).toBeAttached()
+  await expect(earlier).toBeInViewport()
+})
+
 test("records first useful card and terminal completion after final answer renders", async ({
   page,
 }) => {
@@ -206,6 +398,115 @@ test("records first useful card and terminal completion after final answer rende
     entry.finalResponseRenderedMs as number,
   )
   expect(JSON.stringify(entry)).not.toContain(prompt)
+})
+
+test("outbound preview renders while return is pending and yields to verified flights", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  const preview = page.getByRole("region", {
+    name: "Provisional outbound flights",
+  })
+  const cards = page.getByRole("region", { name: "Travel results" })
+  await emit(page, { ...previewEvent, flights: [{ airline: "Incomplete" }] })
+  await emit(page, {
+    type: "status",
+    component: "flights",
+    message: "Waiting on return fixture",
+  })
+  await expect(page.getByRole("status")).toHaveText("Waiting on return fixture")
+  await expect(preview).toHaveCount(0)
+
+  await emit(page, previewEvent)
+  await expect(preview).toBeVisible()
+  await expect(preview).toContainText("Return details and fare pending")
+  await expect(preview.getByText("8:00 AM", { exact: true })).toBeVisible()
+  await expect(preview.getByText("4:00 PM", { exact: true })).toBeVisible()
+  await expect(preview.getByText("1 stop", { exact: true })).toBeVisible()
+  await expect(preview).not.toContainText("123")
+  await expect(preview).not.toContainText("hidden-fixture-token")
+  await expect(preview.getByRole("button")).toHaveCount(0)
+  await expect(cards).toHaveCount(0)
+  await waitForMeasurement(
+    page,
+    (entry) => typeof entry?.firstOutboundPreviewMs === "number",
+  )
+  expect((await measurements(page))![0].firstUsefulCardMs).toBeUndefined()
+  const saved = await page.evaluate(() =>
+    localStorage.getItem("travel_chat_history"),
+  )
+  expect(saved).toContain(prompt)
+  expect(saved).not.toContain("Provisional Fixture Air")
+
+  const roundTrip = {
+    ...flightResult,
+    flights: [
+      {
+        ...flightResult.flights[0],
+        return_flight: {
+          airline: "Fixture Return Air",
+          departure_time: "18:00",
+          arrival_time: "21:00",
+          stops: 0,
+        },
+      },
+    ],
+  }
+  await emit(page, {
+    type: "result",
+    component: "flights",
+    travel_result: roundTrip,
+  })
+  await expect(cards).toContainText("Return · Fixture Return Air")
+  await expect(preview).toHaveCount(0)
+  await waitForMeasurement(
+    page,
+    (entry) => typeof entry?.firstUsefulCardMs === "number",
+  )
+  await emit(page, previewEvent)
+  await emit(page, {
+    type: "done",
+    result: { response: "Round trip confirmed.", travel_result: roundTrip },
+  })
+  await expect(cards).toContainText("Return · Fixture Return Air")
+  await expect(
+    page.getByRole("button", { name: "Stop", exact: true }),
+  ).toHaveCount(0)
+  await expect(preview).toHaveCount(0)
+  const [entry] = (await measurements(page))!
+  expect(entry.firstOutboundPreviewMs).toBeLessThan(
+    entry.firstUsefulCardMs as number,
+  )
+  expect((await latencySummary(page))!.firstOutboundPreviewMs.count).toBe(1)
+})
+
+test("preview stays with its pending chat, clears on Stop, and cannot reappear after reload", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  const preview = page.getByRole("region", {
+    name: "Provisional outbound flights",
+  })
+  await emit(page, previewEvent, prompt)
+  await expect(preview).toBeVisible()
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await submit(page, "Another flight")
+  await expect(preview).toHaveCount(0)
+  await page.getByRole("button", { name: prompt, exact: true }).click()
+  await expect(preview).toBeVisible()
+  await page.getByRole("button", { name: "Stop", exact: true }).click()
+  await emit(page, previewEvent, prompt)
+  await expect(preview).toHaveCount(0)
+  await expect(
+    page.getByText("Search stopped. Late results will be ignored."),
+  ).toBeVisible()
+  await page.reload()
+  await page.getByRole("button", { name: prompt, exact: true }).click()
+  await expect(preview).toHaveCount(0)
 })
 
 test("a completed render remains eligible in the latency summary after New chat", async ({
@@ -307,7 +608,7 @@ test("a stream that finishes in a background chat never gets render timings on r
     .click()
   await expect(
     page.getByText("Background flight done.", { exact: true }),
-  ).toBeVisible()
+  ).toBeHidden()
   await expect(
     page.getByRole("region", { name: "Travel results" }).getByRole("heading", {
       name: "Timing Fixture Air",
@@ -325,6 +626,11 @@ test("request errors and Stop are recorded as terminal failures, never successes
   await controlledTimingStream(page)
   await page.goto("/")
   await submit(page)
+  await emit(page, previewEvent)
+  const preview = page.getByRole("region", {
+    name: "Provisional outbound flights",
+  })
+  await expect(preview).toBeVisible()
   await emit(page, {
     type: "error",
     component: "request",
@@ -333,6 +639,7 @@ test("request errors and Stop are recorded as terminal failures, never successes
   await expect(
     page.getByText("Fixture request failed. Please retry."),
   ).toBeVisible()
+  await expect(preview).toHaveCount(0)
   await waitForMeasurement(page, (entry) => entry?.outcome === "error")
 
   await page.getByRole("button", { name: "New chat", exact: true }).click()
