@@ -22,6 +22,12 @@ ROLE_MODELS = {
 REASONING_EFFORTS = {"none", "low", "medium", "high", "xhigh", "max"}
 
 
+def model_for_role(role: str | None = None) -> str:
+    if role is not None and role not in ROLE_MODELS:
+        raise ValueError(f"Unknown LLM role: {role}")
+    return (ROLE_MODELS[role] if role else "") or LLM_MODEL
+
+
 def get_llm(streaming: bool = True, *, role: str | None = None):
     """Select a model for a graph role, preserving the existing provider path.
 
@@ -29,9 +35,7 @@ def get_llm(streaming: bool = True, *, role: str | None = None):
     coexist. The application manages conversation state in SQLite, so Responses
     requests are stateless and do not store another copy on the provider.
     """
-    if role is not None and role not in ROLE_MODELS:
-        raise ValueError(f"Unknown LLM role: {role}")
-    model = (ROLE_MODELS[role] if role else "") or LLM_MODEL
+    model = model_for_role(role)
     if not model:
         raise ValueError("ACTION REQUIRED: add LLM_MODEL")
 
