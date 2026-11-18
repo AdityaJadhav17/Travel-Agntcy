@@ -25,6 +25,7 @@ import { PATTERNS, PatternType } from "@/utils/patternUtils"
 import TravelResponseCard from "@/components/Chat/TravelResponseCard"
 import StructuredTravelResultCard from "@/components/Chat/StructuredTravelResultCard"
 import OutboundPreviewCard from "@/components/Chat/OutboundPreviewCard"
+import FlightOptionCard from "@/components/Chat/FlightOptionCard"
 import { parseTravelResult } from "@/types/travelResult"
 import { Plane } from "lucide-react"
 import { ChatRequests } from "@/stores/chatRequests"
@@ -117,14 +118,18 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const aiReplied = view.phase === "succeeded" || view.phase === "failed"
   const partialResult = view.phase === "pending" ? view.partial : null
   const outboundPreview = view.phase === "pending" ? view.outboundPreview : null
+  const verifiedFlight =
+    view.phase === "pending" ? view.verifiedFlightPreview : null
   const progressStatus =
     view.phase !== "pending"
       ? ""
-      : outboundPreview
-        ? "Checking return options"
-        : view.status === "Starting search"
-          ? "Reading your trip details"
-          : view.status
+      : verifiedFlight
+        ? "Checking more fares"
+        : outboundPreview
+          ? "Checking return options"
+          : view.status === "Starting search"
+            ? "Reading your trip details"
+            : view.status
   const streamText = view.phase === "pending" ? view.text : ""
   const animationToken = view.phase === "pending" ? view.token : null
 
@@ -163,7 +168,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
       !attempt.renderEligible ||
       currentChatId !== attempt.chatId ||
       view.phase !== "pending" ||
-      !hasUsefulTravelResult(view.partial)
+      (!view.verifiedFlightPreview && !hasUsefulTravelResult(view.partial))
     )
       return
     if (
@@ -180,7 +185,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
           document.visibilityState === "visible" &&
           currentChatId === attempt.chatId &&
           view.phase === "pending" &&
-          hasUsefulTravelResult(view.partial)
+          (view.verifiedFlightPreview || hasUsefulTravelResult(view.partial))
         )
           markFirstUsefulTravelCard(attempt.id)
       })
@@ -358,6 +363,8 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
               token,
               flights: event.flights,
             })
+          } else if (event.type === "verified_flight_preview") {
+            dispatch({ type: event.type, token, flight: event.flight })
           } else if (event.type === "result") {
             dispatch({
               type: "partial",
@@ -684,6 +691,25 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                         )}
                         {outboundPreview && (
                           <OutboundPreviewCard flights={outboundPreview} />
+                        )}
+                        {verifiedFlight && (
+                          <section
+                            aria-label="First checked round trip"
+                            className="space-y-3"
+                          >
+                            <h3 className="text-lg font-semibold tracking-tight text-white">
+                              First checked round trip
+                            </h3>
+                            <FlightOptionCard
+                              leg={verifiedFlight.outbound}
+                              quote={{
+                                state: "complete",
+                                fare: verifiedFlight.total_usd,
+                                oneWay: false,
+                                returned: verifiedFlight.returned,
+                              }}
+                            />
+                          </section>
                         )}
                         {streamText && (
                           <p className="text-sm whitespace-pre-wrap text-gray-300">

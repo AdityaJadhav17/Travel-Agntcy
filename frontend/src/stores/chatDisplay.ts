@@ -1,6 +1,9 @@
 import type { BudgetAssessment } from "../types/budget"
 import type { TravelResult } from "../types/travelResult"
-import type { OutboundPreviewFlight } from "../utils/travelStream"
+import type {
+  OutboundPreviewFlight,
+  VerifiedFlightPreview,
+} from "../utils/travelStream"
 import type { ChatRequestToken } from "./chatRequests"
 
 export interface ConversationMessage {
@@ -33,6 +36,7 @@ export type ChatView =
       status: string
       partial: TravelResult | null
       outboundPreview?: OutboundPreviewFlight[] | null
+      verifiedFlightPreview?: VerifiedFlightPreview | null
       text: string
       animate: boolean
     }
@@ -52,6 +56,11 @@ export type ChatDisplayEvent =
       type: "outbound_preview"
       token: ChatRequestToken
       flights: OutboundPreviewFlight[]
+    }
+  | {
+      type: "verified_flight_preview"
+      token: ChatRequestToken
+      flight: VerifiedFlightPreview
     }
   | { type: "partial"; token: ChatRequestToken; result: TravelResult | null }
   | { type: "text"; token: ChatRequestToken; text: string }
@@ -109,6 +118,7 @@ export function chatDisplayReducer(
           ...view,
           status: event.message,
           outboundPreview: null,
+          verifiedFlightPreview: null,
         })
         break
       case "partial":
@@ -116,12 +126,21 @@ export function chatDisplayReducer(
           ...view,
           partial: event.result,
           outboundPreview: null,
+          verifiedFlightPreview: null,
         })
         break
       case "outbound_preview":
         // Undefined means a snapshot can still arrive. Null closes the preview.
         if (view.outboundPreview !== undefined) return state
         views.set(chatId, { ...view, outboundPreview: event.flights })
+        break
+      case "verified_flight_preview":
+        if (view.verifiedFlightPreview !== undefined) return state
+        views.set(chatId, {
+          ...view,
+          outboundPreview: null,
+          verifiedFlightPreview: event.flight,
+        })
         break
       case "text":
         views.set(chatId, { ...view, text: view.text + event.text })

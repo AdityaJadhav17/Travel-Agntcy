@@ -20,6 +20,14 @@ class OutboundFlight(BaseModel):
     stops: int = Field(ge=0, le=20)
 
 
+class VerifiedFlightPreview(BaseModel):
+    model_config = ConfigDict(strict=True, extra="ignore")
+
+    outbound: OutboundFlight
+    returned: OutboundFlight
+    total_usd: float = Field(gt=0, allow_inf_nan=False)
+
+
 _options = TypeAdapter(Annotated[list[OutboundFlight], Field(min_length=1, max_length=3)])
 _max_event_bytes = 1024 * 1024
 
@@ -36,19 +44,21 @@ class FlightPreviewError(RuntimeError):
     pass
 
 
-async def fetch_flight_preview(url: str, query: str) -> str:
+async def fetch_flight_preview(url: str, query: str, *, verified_preview: bool = False) -> str:
     """Make one request. A failed stream must not launch a second search."""
     try:
         async with timed("flight_preview_round_trip", category="flight"):
             async with httpx.AsyncClient(trust_env=False, timeout=20.0) as client:
                 async with client.stream("POST", url, json={
                     "query": query, "timing_id": current_request_id(),
+                    **({"verified_preview": True} if verified_preview else {}),
                 }) as response:
                     response.raise_for_status()
                     if response.headers.get("content-type", "").split(";", 1)[0] != "application/x-ndjson":
                         raise FlightPreviewError("Flight preview service returned an invalid response.")
                     pending = bytearray()
                     published = False
+                    verified_published = False
                     async for chunk in response.aiter_bytes(chunk_size=None):
                         pending.extend(chunk)
                         while (end := pending.find(b"\n")) != -1:
@@ -68,6 +78,13 @@ async def fetch_flight_preview(url: str, query: str) -> str:
                                     continue
                                 emit("outbound_preview", flights=[option.model_dump() for option in options])
                                 published = True
+                            elif event.get("type") == "verified_flight_preview" and verified_preview and not verified_published:
+                                try:
+                                    flight = VerifiedFlightPreview.model_validate(event.get("flight"))
+                                except ValidationError:
+                                    continue
+                                emit("verified_flight_preview", flight=flight.model_dump())
+                                verified_published = True
                             elif event.get("type") == "done" and isinstance(event.get("output"), str):
                                 return event["output"]
                             elif event.get("type") == "error":

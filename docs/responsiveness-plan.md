@@ -204,12 +204,14 @@ all three token lookups. Across 12 samples per cap, median enrichment was
 first return was ready in about 186 ms. Every search made four provider calls
 and returned all three token-matched round-trip quotes.
 
-The next UX experiment is to stream the first priced round-trip itinerary as
-soon as its return is verified, labeled as an early option while more fares
-are checked. Compare the first verified card separately from the final result.
-Keep the final ranking and the existing rules for budgets, recommendations,
-hotel compatibility, cancellation and saves. A work-in-progress card must
-never be presented as the cheapest complete set.
+The opt-in first checked round-trip card uses the existing private flight
+stream. Enable both `TRAVEL_FLIGHT_PREVIEW_ENABLED` and
+`TRAVEL_VERIFIED_FLIGHT_PREVIEW_ENABLED` for standalone round trips without a
+budget filter. The card shows the first matching priced return while other
+fares are checked. It expires when a final card or error arrives, or when
+the search is stopped. Final ranking, recommendations, hotel compatibility
+and saved results use the completed quote set. Compare `firstUsefulCardMs`
+separately from final render time.
 
 ## Release and measurement gates
 

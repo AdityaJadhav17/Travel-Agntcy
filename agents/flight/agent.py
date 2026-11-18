@@ -16,12 +16,15 @@ from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.graph.state import CompiledStateGraph
 from ioa_observe.sdk.decorators import agent, graph
 
-from agents.travel.serpapi_tools import OutboundPreviewCallback, search_flights
+from agents.travel.serpapi_tools import OutboundPreviewCallback, VerifiedPreviewCallback, search_flights
 from agents.travel.party import party_from_message
 
 logger = logging.getLogger("lungo.flight.agent")
 _outbound_preview: ContextVar[OutboundPreviewCallback | None] = ContextVar(
     "flight_outbound_preview", default=None
+)
+_verified_preview: ContextVar[VerifiedPreviewCallback | None] = ContextVar(
+    "flight_verified_preview", default=None
 )
 
 
@@ -109,6 +112,7 @@ class FlightSearchAgent:
                 include_return_flights=not is_one_way,  # Don't fetch return flights for one-way
                 party=party_from_message(user_msg.content),
                 on_outbound_preview=_outbound_preview.get(),
+                **({"on_verified_preview": verified} if (verified := _verified_preview.get()) else {}),
             )
             
             
@@ -170,7 +174,9 @@ class FlightSearchAgent:
         return json.dumps(response_data)
     
     async def ainvoke(
-        self, message: str, *, on_outbound_preview: OutboundPreviewCallback | None = None
+        self, message: str, *,
+        on_outbound_preview: OutboundPreviewCallback | None = None,
+        on_verified_preview: VerifiedPreviewCallback | None = None,
     ) -> str:
         """
         Invoke the flight search agent with a message.
@@ -182,11 +188,13 @@ class FlightSearchAgent:
             Flight search results as JSON string
         """
         token = _outbound_preview.set(on_outbound_preview)
+        verified_token = _verified_preview.set(on_verified_preview)
         try:
             result = await self.graph.ainvoke({
                 "messages": [HumanMessage(content=message)]
             })
         finally:
+            _verified_preview.reset(verified_token)
             _outbound_preview.reset(token)
         
         # Get the last AI message

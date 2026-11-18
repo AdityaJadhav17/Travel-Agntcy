@@ -18,10 +18,17 @@ export interface OutboundPreviewFlight {
   stops: number
 }
 
+export interface VerifiedFlightPreview {
+  outbound: OutboundPreviewFlight
+  returned: OutboundPreviewFlight
+  total_usd: number
+}
+
 export type TravelStreamEvent =
   | { type: "status"; component: string; message: string }
   | { type: "result"; component: string; travel_result: TravelResult }
   | { type: "outbound_preview"; flights: OutboundPreviewFlight[] }
+  | { type: "verified_flight_preview"; flight: VerifiedFlightPreview }
   | { type: "error"; component: string; message: string }
   | { type: "text"; text: string }
 
@@ -72,6 +79,15 @@ function outboundPreview(value: unknown): OutboundPreviewFlight[] | null {
     flights.push({ airline, departure_time, arrival_time, stops })
   }
   return flights
+}
+
+function verifiedPreview(value: unknown): VerifiedFlightPreview | null {
+  if (!record(value)) return null
+  const legs = outboundPreview([value.outbound, value.returned])
+  const fare = value.total_usd
+  if (!legs || typeof fare !== "number" || !Number.isFinite(fare) || fare <= 0)
+    return null
+  return { outbound: legs[0], returned: legs[1], total_usd: fare }
 }
 
 function budget(value: unknown): BudgetAssessment | null {
@@ -203,6 +219,11 @@ export class TravelStream {
         case "outbound_preview": {
           const flights = outboundPreview(event.flights)
           if (flights) onEvent({ type: "outbound_preview", flights })
+          break
+        }
+        case "verified_flight_preview": {
+          const flight = verifiedPreview(event.flight)
+          if (flight) onEvent({ type: "verified_flight_preview", flight })
           break
         }
       }
