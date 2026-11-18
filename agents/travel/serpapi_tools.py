@@ -22,6 +22,7 @@ from typing import Optional
 from datetime import datetime
 
 from config.config import SERPAPI_API_KEY, SERPAPI_BASE_URL
+from agents.travel.flight_timing import FlightSearchTiming, FlightTiming, spread_departures
 from agents.travel.party import TravelParty
 from common.travel_timing import timed
 from agents.travel.provider_http import provider_concurrency_limit, provider_http_client
@@ -30,6 +31,12 @@ logger = logging.getLogger("lungo.travel.serpapi_tools")
 
 OutboundPreviewCallback = Callable[[list[dict]], None]
 VerifiedPreviewCallback = Callable[[dict], None]
+RETURN_SEARCH_DEADLINE_SECONDS = 18.0
+
+
+class ProviderUnavailable(RuntimeError):
+    """A transient provider failure that can leave other quotes usable."""
+
 
 # Semaphores are scoped to event loops: provider tools may be called from
 # standalone asyncio.run() invocations as well as the long-lived service loop.
@@ -96,9 +103,12 @@ async def _request_search(params: dict) -> dict:
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPStatusError as exc:
-        raise RuntimeError(f"SerpAPI returned HTTP {exc.response.status_code}. Check SERPAPI_API_KEY and account quota.") from None
+        status = exc.response.status_code
+        if status in (408, 429) or status >= 500:
+            raise ProviderUnavailable(f"SerpAPI returned HTTP {status}. Please retry.") from None
+        raise RuntimeError(f"SerpAPI returned HTTP {status}. Check SERPAPI_API_KEY and account quota.") from None
     except httpx.HTTPError:
-        raise RuntimeError("SerpAPI could not be reached. Please retry.") from None
+        raise ProviderUnavailable("SerpAPI could not be reached. Please retry.") from None
     if "error" in data:
         raise RuntimeError("SerpAPI rejected the search. Check the location, dates, API key, and account quota.")
     return data
@@ -132,6 +142,7 @@ async def search_flights(
     *,
     on_outbound_preview: OutboundPreviewCallback | None = None,
     on_verified_preview: VerifiedPreviewCallback | None = None,
+    flight_timing: FlightTiming | None = None,
 ) -> list[dict]:
     """
     Search for flights using SerpAPI's Google Flights engine.
@@ -209,6 +220,10 @@ async def search_flights(
     # Only include return_date for round-trip searches
     if not is_one_way and return_date:
         params["return_date"] = return_date
+    if flight_timing:
+        params.update(flight_timing.provider_filters())
+    pinned = flight_timing.pinned_outbound if isinstance(flight_timing, FlightSearchTiming) else None
+    return_deadline = asyncio.get_running_loop().time() + RETURN_SEARCH_DEADLINE_SECONDS
     
     try:
         # Make async HTTP request to SerpAPI for outbound flights
@@ -228,17 +243,35 @@ async def search_flights(
         
         for flight_group in best_flights + other_flights:
             flight_info = _parse_flight(flight_group)
-            if flight_info:
+            if flight_info and (not flight_timing or flight_timing.matches_leg(flight_info, "outbound")):
                 flight_info["party"] = party.model_dump()
                 flight_info["price_scope"] = "requested_party"
                 all_flights.append(flight_info)
         
         logger.info(f"Found {len(all_flights)} outbound flights")
+        if pinned:
+            matching = {flight["departure_token"]: flight for flight in all_flights
+                        if flight.get("departure_token") and pinned.matches(flight)}
+            # A legacy itinerary without flight numbers can match more than one
+            # token. In that case the provider cannot identify it uniquely.
+            if len(matching) != 1:
+                return []
+            all_flights = list(matching.values())
         
         # Retrieve return legs for the actual selected outbound itinerary.
         # An unrelated one-way search cannot establish a round-trip fare.
         if not is_one_way:
-            candidates = sorted(all_flights, key=lambda item: item["price"])[:3]
+            candidates = sorted(all_flights, key=lambda item: item["price"])
+            if flight_timing:
+                candidates = [flight for flight in candidates if flight.get("departure_token")]
+                if flight_timing.compare_departures == "outbound":
+                    candidates = spread_departures(candidates)
+                if flight_timing.outbound_departure_fallback:
+                    preferred = [flight for flight in candidates if flight_timing.preferred_outbound(flight)]
+                    alternate = [flight for flight in candidates if not flight_timing.preferred_outbound(flight)]
+                    # Leave room for an explicitly accepted fallback within the normal lookup cap.
+                    candidates = preferred[:2] + alternate[:1] if alternate and len(preferred) >= 2 else preferred + alternate
+            candidates = candidates[:3]
             candidates_with_tokens = [(flight, flight.get("departure_token")) for flight in candidates]
             candidates_with_tokens = [(flight, token) for flight, token in candidates_with_tokens if token]
             if on_outbound_preview is not None and candidates_with_tokens:
@@ -257,10 +290,14 @@ async def search_flights(
 
             async def lookup(flight, token):
                 nonlocal verified_published
-                data = await _request_provider({**params, "departure_token": token})
+                try:
+                    async with asyncio.timeout_at(return_deadline):
+                        data = await _request_provider({**params, "departure_token": token})
+                except (TimeoutError, ProviderUnavailable):
+                    return None
                 if on_verified_preview is not None and not verified_published:
                     try:
-                        selected = _lowest_return_quote(data)
+                        selected = _lowest_return_quote(data, flight_timing)
                         if selected and (card := _verified_preview(flight, selected, params)):
                             on_verified_preview(card)
                             verified_published = True
@@ -279,11 +316,38 @@ async def search_flights(
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
-            for (flight, _), return_data in zip(candidates_with_tokens, return_options):
-                if selected := _lowest_return_quote(return_data):
-                    flight["return_flight"] = selected
-                    flight["price"] = selected["price"]
+            completed = [(flight, data) for (flight, _), data in zip(candidates_with_tokens, return_options)
+                         if data is not None]
+            incomplete = len(completed) != len(tasks)
+            if flight_timing or incomplete:
+                # Reuse priced returns from the existing lookups. An unchecked
+                # outbound alone cannot satisfy a return request.
+                all_flights = [
+                    {**flight, "return_flight": quote, "price": quote["price"]}
+                    for flight, data in completed
+                    for quote in (
+                        _return_quotes(data, flight_timing) if flight_timing and flight_timing.compare_departures == "return"
+                        else [_lowest_return_quote(data, flight_timing)]
+                    )
+                    if quote
+                ]
+                if incomplete:
+                    if not all_flights:
+                        raise RuntimeError("Some return options could not be checked.")
+                    for quote in all_flights:
+                        quote["return_lookup_incomplete"] = True
+            else:
+                for flight, data in completed:
+                    if selected := _lowest_return_quote(data, flight_timing):
+                        flight["return_flight"] = selected
+                        flight["price"] = selected["price"]
 
+        if flight_timing and flight_timing.compare_departures:
+            all_flights = spread_departures(
+                sorted(all_flights, key=lambda quote: quote["price"]), leg=flight_timing.compare_departures,
+            )
+        if flight_timing and flight_timing.outbound_departure_fallback:
+            all_flights.sort(key=lambda quote: (not flight_timing.preferred_outbound(quote), quote["price"]))
         return all_flights
         
     except httpx.HTTPError as e:
@@ -304,9 +368,17 @@ def _preview_leg(flight: dict) -> dict:
     }
 
 
-def _lowest_return_quote(data: dict) -> dict | None:
+def _return_quotes(data: dict, timing: FlightTiming | None) -> list[dict]:
     options = data.get("best_flights", []) + data.get("other_flights", [])
-    priced = [quote for option in options if (quote := _parse_return_flight(option)) and quote.get("price", 0) > 0]
+    return [
+        quote for option in options
+        if (quote := _parse_return_flight(option)) and quote.get("price", 0) > 0
+        and (not timing or timing.matches_leg(quote, "return"))
+    ]
+
+
+def _lowest_return_quote(data: dict, timing: FlightTiming | None = None) -> dict | None:
+    priced = _return_quotes(data, timing)
     return min(priced, key=lambda quote: quote["price"]) if priced else None
 
 
@@ -533,6 +605,8 @@ def _parse_flight(flight_group: dict) -> Optional[dict]:
         return {
             "price": price,
             "departure_token": flight_group.get("departure_token"),
+            "flight_numbers": [leg["flight_number"] for leg in flights
+                               if isinstance(leg.get("flight_number"), str)][:20],
             "currency": "USD",  # All flight requests explicitly ask SerpAPI for USD.
             # Outbound flight details
             "departure_time": departure_time,

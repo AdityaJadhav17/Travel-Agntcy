@@ -377,3 +377,28 @@ and production build pass. All 30 Chromium/Firefox journeys pass, including
 flight-only explanation after reload and a seven-date comparison through the
 API, A2A agents and fixture provider. These tests do not measure live-provider
 fare coverage or guarantee the least expensive dates outside the checked window.
+
+### Airport-local flight times
+
+1. Keep outbound and return departure and arrival windows in the saved trip.
+   A short reply such as “evening flights” or “after 6:30 p.m.” edits the
+   existing trip. Ask about ambiguous clock times before searching. Clear
+   preferences when the traveler says “any time.”
+2. Pass the provider its supported hour ranges and check the actual itinerary
+   at minute precision. Match each clock at its airport, including windows
+   that cross midnight. Check the return leg before quoting a timed round trip.
+3. For comparisons, lead with the lowest returned fare from each available
+   period. Reuse the existing return lookups and say when a requested period
+   yielded no quote. A timed search with no matches offers an explicit way to
+   broaden the search.
+4. Verify the flight agent and result cards with provider fixtures that include
+   cheaper out-of-window fares, exact boundaries, missing return matches,
+   comparisons, and follow-ups that preserve the route, dates, and party.
+
+Date comparisons apply a new clock window across the same date range. A short
+AM/PM reply resolves the saved clock question for the original leg and action.
+For a later-return request with a fixed outbound, recheck the saved itinerary
+against the current provider response and price only returns paired with it.
+Try an explicitly accepted departure fallback when the preferred fares do
+not meet the search constraints. If a return lookup fails, keep verified fares
+and show that fewer returns were checked.

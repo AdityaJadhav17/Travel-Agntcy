@@ -34,6 +34,66 @@ async function send(page: Page, prompt: string) {
   return { ...finalResult, _events: events }
 }
 
+test("flight time follow-ups keep the trip and show matching quotes", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const evening = await send(
+    page,
+    `Find one-way evening flights from Seattle to Chicago on ${start}`,
+  )
+  expect(evening.travel_result.flights).toMatchObject([
+    { departure_time: `${start} 19:00` },
+  ])
+  await expect(
+    page
+      .getByRole("region", { name: "Travel results" })
+      .getByText(/outbound departure 18:00/),
+  ).toBeVisible()
+
+  const compared = await send(page, "Show me different times of the day")
+  expect(compared.travel_result).toMatchObject({
+    origin: "SEA",
+    destination: "Chicago",
+    start_date: start,
+    flights: [
+      { departure_time: `${start} 08:00` },
+      { departure_time: `${start} 15:00` },
+      { departure_time: `${start} 19:00` },
+    ],
+  })
+
+  const empty = await send(page, "Leave after 10 p.m.")
+  expect(empty.travel_result).toBeFalsy()
+  await expect(
+    page.getByText(/I found no priced flights for outbound departure/),
+  ).toBeVisible()
+  const relaxed = await send(page, "Any time")
+  expect(relaxed.travel_result.flights).toHaveLength(3)
+
+  const ambiguous = await send(page, "After 7")
+  expect(ambiguous.travel_result).toBeFalsy()
+  await expect(page.getByText(/7 a\.m\. or 7 p\.m\./)).toBeVisible()
+  const resolved = await send(page, "PM")
+  expect(resolved.travel_result.flights).toMatchObject([
+    { departure_time: `${start} 19:00` },
+  ])
+
+  const nearby = await send(
+    page,
+    "Show cheaper dates, but only evening flights",
+  )
+  expect(nearby.travel_result).toMatchObject({
+    kind: "date_comparison",
+    start_date: start,
+    notice: expect.stringContaining("18:00–24:00"),
+  })
+  expect(nearby.travel_result.date_alternatives).toHaveLength(7)
+  for (const option of nearby.travel_result.date_alternatives) {
+    expect(option.flight.departure_time).toBe(`${option.departure_date} 19:00`)
+  }
+})
+
 test("structured cards survive rewritten narrative and reload", async ({
   page,
 }) => {

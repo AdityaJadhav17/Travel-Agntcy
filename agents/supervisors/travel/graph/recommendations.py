@@ -31,6 +31,7 @@ class FlightItinerary(BaseModel):
     arrival_code: str = Field(default="", max_length=8)
     stops: int = Field(default=0, ge=0)
     duration_minutes: int = Field(default=0, ge=0)
+    flight_numbers: list[str] = Field(default_factory=list, max_length=20)
     return_flight: "ReturnItinerary | None" = None
 
 

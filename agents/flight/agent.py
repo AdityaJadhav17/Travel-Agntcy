@@ -18,6 +18,7 @@ from ioa_observe.sdk.decorators import agent, graph
 
 from agents.travel.serpapi_tools import OutboundPreviewCallback, VerifiedPreviewCallback, search_flights
 from agents.travel.party import party_from_message
+from agents.travel.flight_timing import timing_from_message
 
 logger = logging.getLogger("lungo.flight.agent")
 _outbound_preview: ContextVar[OutboundPreviewCallback | None] = ContextVar(
@@ -112,6 +113,7 @@ class FlightSearchAgent:
                 include_return_flights=not is_one_way,  # Don't fetch return flights for one-way
                 party=party_from_message(user_msg.content),
                 on_outbound_preview=_outbound_preview.get(),
+                **({"flight_timing": timing} if (timing := timing_from_message(user_msg.content)) else {}),
                 **({"on_verified_preview": verified} if (verified := _verified_preview.get()) else {}),
             )
             

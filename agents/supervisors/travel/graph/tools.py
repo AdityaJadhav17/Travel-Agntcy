@@ -37,6 +37,7 @@ from config.config import (
     TRAVEL_HOTEL_CHECKIN_GAP_HOURS,
 )
 from agents.travel.travel_logic import find_cheapest_plan
+from agents.travel.flight_timing import FlightTiming
 from agents.travel.party import TravelParty
 from common.travel_timing import current_request_id, timed
 
@@ -154,6 +155,7 @@ async def _search_flights_internal(
     *,
     allow_preview: bool = False,
     allow_verified_preview: bool = False,
+    flight_timing: FlightTiming | None = None,
 ) -> str:
     """
     Internal function to search for flights using the Flight Search Agent via A2A.
@@ -185,6 +187,8 @@ async def _search_flights_internal(
     else:
         message = f"origin:{origin} destination:{destination} outbound:{outbound_date} return:{return_date}"
     
+    if flight_timing:
+        message += " timing:" + flight_timing.model_dump_json(exclude_none=True)
     message += " party:" + party.model_dump_json()
     try:
         if allow_preview and not is_one_way and return_date and preview_enabled():
@@ -288,6 +292,7 @@ async def get_flights_via_a2a(
     *,
     allow_preview: bool = False,
     allow_verified_preview: bool = False,
+    flight_timing: FlightTiming | None = None,
 ) -> list:
     """
     Get flights via A2A and parse the response.
@@ -310,6 +315,7 @@ async def get_flights_via_a2a(
         origin, destination, outbound_date, return_date, is_one_way, party=party,
         **({"allow_preview": True} if allow_preview else {}),
         **({"allow_verified_preview": True} if allow_verified_preview else {}),
+        **({"flight_timing": flight_timing} if flight_timing else {}),
     )
     
     try:
