@@ -41,6 +41,8 @@ services:
       - TRAVEL_PROVIDER_CONCURRENCY=${TRAVEL_PROVIDER_CONCURRENCY:-3}
       - FLIGHT_AGENT_HOST=0.0.0.0
       - FLIGHT_AGENT_PORT=9001
+      - TRAVEL_FLIGHT_PREVIEW_ENABLED=${TRAVEL_FLIGHT_PREVIEW_ENABLED:-false}
+      - IDENTITY_AUTH_ENABLED=${IDENTITY_AUTH_ENABLED:-false}
       - ENABLE_HTTP=true
     healthcheck:
       test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9001/.well-known/agent.json')"]
@@ -133,6 +135,8 @@ services:
       - TRAVEL_CONVERSATION_DB=/data/conversations.sqlite3
       - TRAVEL_SECURITY_DB=/data/security.sqlite3
       - TRAVEL_SECURITY_ENABLED=true
+      - TRAVEL_FLIGHT_PREVIEW_ENABLED=${TRAVEL_FLIGHT_PREVIEW_ENABLED:-false}
+      - TRAVEL_COMBINED_DECISION_ENABLED=${TRAVEL_COMBINED_DECISION_ENABLED:-false}
       - TRACING_ENABLED=${TRACING_ENABLED:-false}
       - DEFAULT_MESSAGE_TRANSPORT=${DEFAULT_MESSAGE_TRANSPORT:-NATS}
       - TRANSPORT_SERVER_ENDPOINT=${DOCKER_TRANSPORT_SERVER_ENDPOINT:-nats://nats:4222}

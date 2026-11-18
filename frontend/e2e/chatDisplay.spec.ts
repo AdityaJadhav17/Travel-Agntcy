@@ -77,6 +77,20 @@ test("stop and replacement reject stale progress, animation, and completion", ()
   state = reduce(state, { type: "stop", token: old })
   expect(state.history[0].outcome).toBe("stopped")
   state = reduce(state, { type: "start", token: next, entry: chat })
+  expect(
+    reduce(state, {
+      type: "outbound_preview",
+      token: old,
+      flights: [
+        {
+          airline: "Late Preview Air",
+          departure_time: "09:00",
+          arrival_time: "12:00",
+          stops: 0,
+        },
+      ],
+    }),
+  ).toBe(state)
   expect(reduce(state, { type: "text", token: old, text: "late" })).toBe(state)
   expect(reduce(state, { type: "animated", token: old })).toBe(state)
   expect(

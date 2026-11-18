@@ -32,9 +32,14 @@ def get_json(url):
 
 
 def counters():
-    model = get_json(f"{API}/__eval/metrics")["extraction_calls"]
+    model = get_json(f"{API}/__eval/metrics")
     providers = get_json(f"{PROVIDERS}/__eval/metrics")["provider_calls"]
-    return {"fixture_extractions": model, **{f"provider_{key}": value for key, value in providers.items()}}
+    return {
+        "fixture_extractions": model["extraction_calls"] + model["combined_calls"],
+        "fixture_model_calls": sum(model.values()),
+        "fixture_combined_calls": model["combined_calls"],
+        **{f"provider_{key}": value for key, value in providers.items()},
+    }
 
 
 def request(conversation_id, prompt, request_id=None):
@@ -128,11 +133,18 @@ def continuity(evaluation):
 
 def ambiguous_dates(evaluation):
     conversation = str(uuid4())
-    first = evaluation.turn(conversation, "Plan Dallas to New York in early October")
+    first = evaluation.turn(conversation, "Plan a trip from Dallas to New York in early October")
+    combined_enabled = os.getenv("TRAVEL_COMBINED_DECISION_ENABLED", "false").lower() == "true"
+    first_turn_cost = evaluation.rows[-1]["cost_proxy"]
+    evaluation.check(first_turn_cost["fixture_combined_calls"] == int(combined_enabled)
+                     and first_turn_cost["fixture_model_calls"] == (1 if combined_enabled else 2),
+                     "eligible first turn uses the expected model path", kind="cost")
     evaluation.check("Which dates" in first["response"], "ambiguous date asks a question")
     evaluation.check(first["trip_state"].get("start_date") is None, "ambiguous date not invented")
     start, end = future_dates()
     completed = evaluation.turn(conversation, f"{start} to {end}")
+    evaluation.check(evaluation.rows[-1]["cost_proxy"]["fixture_combined_calls"] == 0,
+                     "date clarification uses the existing model path", kind="cost")
     evaluation.check(completed["trip_state"].get("start_date") == str(start), "date clarification retained")
 
 
@@ -199,7 +211,7 @@ def unsupported_constraints(evaluation):
     age = evaluation.turn(conversation, "age 7")
     evaluation.check("supports one room only" in age["response"], "two-room limitation is disclosed")
     evaluation.check(age.get("travel_result") is None, "unsupported room count is not searched")
-    foreign = evaluation.turn(str(uuid4()), f"Plan Dallas to New York {start} to {end} budget eur 1000")
+    foreign = evaluation.turn(str(uuid4()), f"Plan a trip from Dallas to New York {start} to {end} budget eur 1000")
     evaluation.check(foreign.get("budget_assessment") is None, "EUR not silently treated as USD")
     evaluation.check("cannot convert your EUR budget" in foreign["response"], "currency limitation disclosed")
 

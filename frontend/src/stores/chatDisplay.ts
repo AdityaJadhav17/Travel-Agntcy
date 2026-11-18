@@ -1,5 +1,6 @@
 import type { BudgetAssessment } from "../types/budget"
 import type { TravelResult } from "../types/travelResult"
+import type { OutboundPreviewFlight } from "../utils/travelStream"
 import type { ChatRequestToken } from "./chatRequests"
 
 export interface ConversationMessage {
@@ -31,6 +32,7 @@ export type ChatView =
       token: ChatRequestToken
       status: string
       partial: TravelResult | null
+      outboundPreview?: OutboundPreviewFlight[] | null
       text: string
       animate: boolean
     }
@@ -45,7 +47,12 @@ export const idleView: ChatView = { phase: "idle" }
 
 export type ChatDisplayEvent =
   | { type: "start"; token: ChatRequestToken; entry: ChatHistoryItem }
-  | { type: "status"; token: ChatRequestToken; message: string }
+  | { type: "status" | "error"; token: ChatRequestToken; message: string }
+  | {
+      type: "outbound_preview"
+      token: ChatRequestToken
+      flights: OutboundPreviewFlight[]
+    }
   | { type: "partial"; token: ChatRequestToken; result: TravelResult | null }
   | { type: "text"; token: ChatRequestToken; text: string }
   | { type: "animated"; token: ChatRequestToken }
@@ -97,8 +104,24 @@ export function chatDisplayReducer(
       case "status":
         views.set(chatId, { ...view, status: event.message })
         break
+      case "error":
+        views.set(chatId, {
+          ...view,
+          status: event.message,
+          outboundPreview: null,
+        })
+        break
       case "partial":
-        views.set(chatId, { ...view, partial: event.result })
+        views.set(chatId, {
+          ...view,
+          partial: event.result,
+          outboundPreview: null,
+        })
+        break
+      case "outbound_preview":
+        // Undefined means a snapshot can still arrive. Null closes the preview.
+        if (view.outboundPreview !== undefined) return state
+        views.set(chatId, { ...view, outboundPreview: event.flights })
         break
       case "text":
         views.set(chatId, { ...view, text: view.text + event.text })

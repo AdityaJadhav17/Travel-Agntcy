@@ -271,8 +271,8 @@ async def handle_stream_prompt(prompt_request: PromptRequest, request: Request):
                 task = asyncio.create_task(_conversation_response(prompt_request, session["executionID"]))
             finally:
                 progress_sink.reset(token)
-            yield json.dumps({"type": "status", "component": "request", "message": "Starting search"}) + "\n"
             try:
+                yield json.dumps({"type": "status", "component": "request", "message": "Starting search"}) + "\n"
                 while not task.done() or not queue.empty():
                     if await request.is_disconnected():
                         task.cancel()

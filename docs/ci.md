@@ -20,10 +20,7 @@ permissions, explicit timeouts, and no application secrets. Superseded PR runs
 are cancelled. Reports, traces, screenshots, videos on failure, and CI service
 logs are retained for 14 days. Dependabot checks Actions, npm, uv and Docker
 weekly. No audit job is configured to continue on error. Python audit exceptions
-are recorded in `scripts/ci/audit_exceptions.json`. The maintainer approved one
-exception on September 25, 2026: `nltk==3.10.3` / `PYSEC-2026-3740`, expiring
-October 9, 2026 at 00:00 UTC. This accepts the finding temporarily; it does not
-patch NLTK or change application functionality. Each exception requires
+are recorded in `scripts/ci/audit_exceptions.json`. Each exception requires
 an exact package, version and advisory ID, a reason, and an approval/expiry window
 of at most 14 days. They fail at 00:00 UTC on the expiry date and stop applying
 as soon as the scanner reports a fixed version. Findings remain in the raw JSON;
@@ -96,7 +93,7 @@ Audits require network access to advisory registries (outside the internal E2E
 network):
 
 ```sh
-docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks sh -c 'npm audit --audit-level=low --json > /reports/npm-audit.json'
+docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps frontend-checks sh -c 'node --test scripts/audit-dependencies.test.mjs && node scripts/audit-dependencies.mjs /reports/npm-audit.json'
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv export --locked --group ci --no-emit-project --no-hashes -o /reports/python-requirements.txt
 docker compose -p travel-ci -f compose.ci.yaml run --rm --no-deps python-checks uv run --no-sync python scripts/ci/audit_policy.py --requirements /reports/python-requirements.txt --report /reports/python-audit.json --decision /reports/python-audit-decision.json
 ```
@@ -122,16 +119,17 @@ volume cleanup against the normal developer Compose project.
 
 ## Dependency audit status
 
-On 2026-09-24, npm audit reported zero vulnerabilities. The Python runtime and CI
-audit initially reported **403 advisories across 42 packages**. Dependency updates
-and removal of unused adapters reduced the same audit to **1 advisory in NLTK
-3.10.3**, with no published fix. The maintainer approved the exact, expiring
-exception above; all other findings still block. The raw audit retains the
-finding, and CI reports `passed_with_exception` while the exception is valid.
-See the
-[remediation notes](dependency-remediation.md) for the dependency path,
-application reachability assessment, and verification results. Counts reflect
-scanner reports, not an assessment that every advisory is exploitable in this app.
+On 2026-11-17, the Python lock was updated to OpenTelemetry API 1.45.2 for
+[CVE-2026-126360](https://github.com/open-telemetry/opentelemetry-python/security/advisories/GHSA-mf5v-w3w3-f6cg).
+The Python exception list is empty.
+
+The frontend audit records a temporary exception for `picomatch@4.0.7` and
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), which
+had no patched release on 2026-11-17. Every affected installation must be
+development-only in the lockfile, and each reported dependency finding must
+trace to that exact advisory. The production image ships built assets and nginx.
+The full JSON report and CI warning retain the finding. The exception expires
+at 00:00 UTC on 2026-11-24. Remove it when updating to a patched release.
 
 The old coffee/logistics integration tests reference services outside this travel
 application and are not part of the gate. The current regression suite is
