@@ -160,6 +160,19 @@ jobs:
                 f"p95 turn latency: {result['latency_ms']['p95']} ms")
           print(f"Fixture tool-call proxy: {result['tool_cost_proxy']}")
           PY
+      - name: Verify checked fares while a return is blocked
+        env:
+          TRAVEL_FLIGHT_PREVIEW_ENABLED: "true"
+          TRAVEL_VERIFIED_FLIGHT_PREVIEW_ENABLED: "true"
+        run: |
+          preview_stack=(docker compose -p travel-ci-checked-fare -f compose.ci.yaml)
+          cleanup_preview_stack() {
+            "${preview_stack[@]}" logs --no-color > .runtime/ci/checked-fare-services.log 2>&1 || true
+            "${preview_stack[@]}" down --volumes --remove-orphans
+          }
+          trap cleanup_preview_stack EXIT
+          "${preview_stack[@]}" up -d --no-build --wait --wait-timeout 120 api
+          "${preview_stack[@]}" exec -T api uv run --no-sync python scripts/ci/check_flight_preview.py
       - name: Collect service logs
         if: always()
         run: |
@@ -173,6 +186,7 @@ jobs:
             .runtime/ci/playwright
             .runtime/ci/playwright-report
             .runtime/ci/conversation-eval.json
+            .runtime/ci/checked-fare-services.log
             .runtime/ci/services.log
           include-hidden-files: true
           retention-days: 14

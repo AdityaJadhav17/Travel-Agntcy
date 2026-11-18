@@ -259,14 +259,10 @@ test("reload of a live stream shows recovery, while stopped chats stay stopped",
   await page.getByRole("button", { name: "New chat", exact: true }).click()
   await submit(page, "Stopped trip")
   await page.getByRole("button", { name: "Stop", exact: true }).click()
-  await expect(
-    page.getByText("Search stopped. Late results will be ignored."),
-  ).toBeVisible()
+  await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await page.reload()
   await page.getByRole("button", { name: "Stopped trip", exact: true }).click()
-  await expect(
-    page.getByText("Search stopped. Late results will be ignored."),
-  ).toBeVisible()
+  await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await expect(
     page.getByRole("button", { name: "Retry last message", exact: true }),
   ).toHaveCount(0)
@@ -288,9 +284,7 @@ test("failed deletion of a running chat restores an editable stopped view", asyn
     ),
   ).toBeVisible()
   await expect(page.getByRole("textbox")).toBeEnabled()
-  await expect(
-    page.getByText("Search stopped. Late results will be ignored."),
-  ).toBeVisible()
+  await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await expect(
     page.getByRole("button", { name: "Stop", exact: true }),
   ).toHaveCount(0)

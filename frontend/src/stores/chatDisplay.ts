@@ -1,5 +1,6 @@
 import type { BudgetAssessment } from "../types/budget"
 import type { TravelResult } from "../types/travelResult"
+import type { TripContext } from "../types/tripContext"
 import type {
   OutboundPreviewFlight,
   VerifiedFlightPreview,
@@ -11,6 +12,7 @@ export interface ConversationMessage {
   content: string
   budget_assessment?: BudgetAssessment | null
   travel_result?: TravelResult | null
+  trip_state?: TripContext | null
   retry_hotels?: boolean
 }
 
@@ -161,7 +163,7 @@ export function chatDisplayReducer(
           event.type === "stop"
             ? {
                 role: "assistant",
-                content: "Search stopped. Late results will be ignored.",
+                content: "Search stopped.",
               }
             : event.message
         views.set(chatId, { phase: outcome })

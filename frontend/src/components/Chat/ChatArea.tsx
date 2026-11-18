@@ -23,6 +23,7 @@ interface ChatAreaProps {
   setAiReplied: (replied: boolean) => void
   isBottomLayout: boolean
   showCoffeePrompts?: boolean
+  showTravelStarters?: boolean
   showLogisticsPrompts?: boolean
   showProgressTracker?: boolean
   showAuctionStreaming?: boolean
@@ -46,12 +47,22 @@ interface ChatAreaProps {
   grafanaUrl?: string
 }
 
+const starters = [
+  { label: "Find flights", draft: "Find flights from " },
+  { label: "Find a hotel", draft: "Find a hotel in " },
+  {
+    label: "Flights + hotel",
+    draft: "Find flights and a hotel only. I'm leaving from ",
+  },
+]
+
 const ChatArea: React.FC<ChatAreaProps> = ({
   setMessages,
   setButtonClicked,
   setAiReplied,
   isBottomLayout,
   showCoffeePrompts = false,
+  showTravelStarters = false,
   showProgressTracker = false,
   showAuctionStreaming = false,
   pattern,
@@ -145,9 +156,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault()
-      processMessage()
+      if (!loading && !isAgentLoading) void processMessage()
     }
   }
 
@@ -156,6 +167,9 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }
 
   const isDisabled = loading || isAgentLoading
+  const canApplyStarter =
+    !isDisabled &&
+    (!content.trim() || starters.some(({ draft }) => content === draft))
 
   return (
     <div ref={chatRef} className="relative flex w-full flex-col bg-[#212121]">
@@ -170,15 +184,40 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
-        {/* ChatGPT-style input container */}
         <div className="w-full max-w-[768px]">
+          {showTravelStarters && (
+            <div
+              role="group"
+              aria-label="Search starters"
+              className="mb-3 flex flex-wrap gap-2"
+            >
+              {starters.map(({ label, draft }) => (
+                <button
+                  key={label}
+                  type="button"
+                  disabled={!canApplyStarter}
+                  onClick={() => {
+                    setContent(draft)
+                    textareaRef.current?.focus()
+                  }}
+                  className="min-h-11 rounded-md border border-white/15 px-3 text-sm font-medium text-gray-200 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-emerald-300 disabled:opacity-50"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="relative flex flex-col rounded-2xl border border-[#424242] bg-[#2f2f2f] shadow-lg transition-all focus-within:border-[#5a5a5a]">
             {/* Textarea */}
             <textarea
               aria-label="Message Travel AGNTCY"
               ref={textareaRef}
               className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 py-3.5 pr-16 text-[15px] leading-6 text-gray-100 outline-hidden placeholder:text-gray-500"
-              placeholder="Message Travel AGNTCY..."
+              placeholder={
+                showTravelStarters
+                  ? "Enter a route, destination, or travel dates"
+                  : "Add details or ask about these results"
+              }
               value={content}
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -221,12 +260,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
               </button>
             </div>
           </div>
-
-          {/* Footer text */}
-          <p className="mt-2 text-center text-xs text-gray-500">
-            Travel AGNTCY can make mistakes. Consider verifying important
-            information.
-          </p>
         </div>
       </div>
     </div>

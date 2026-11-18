@@ -1,4 +1,5 @@
-import type { TravelResult } from "@/types/travelResult"
+import { useState } from "react"
+import type { FlightCard, TravelResult } from "@/types/travelResult"
 import FlightOptionCard from "./FlightOptionCard"
 import { flightStops as stops, formatFare } from "@/utils/flightDisplay"
 
@@ -10,13 +11,15 @@ const usd = (value: number | null) =>
         currency: "USD",
       }).format(value)
 
+const comparableFare = (flight: FlightCard, oneWay: boolean) =>
+  oneWay || flight.return_flight ? flight.total_usd : null
+
 function flightSummary(result: TravelResult) {
   if (result.kind !== "flight_only") return null
-  const comparable = result.flights.flatMap((flight) =>
-    flight.total_usd !== null && (result.is_one_way || flight.return_flight)
-      ? [{ fare: flight.total_usd, stops: flight.stops }]
-      : [],
-  )
+  const comparable = result.flights.flatMap((flight) => {
+    const fare = comparableFare(flight, result.is_one_way)
+    return fare === null ? [] : [{ fare, stops: flight.stops }]
+  })
   if (comparable.length < 2) return null
   const lowest = Math.min(...comparable.map((flight) => flight.fare))
   const nonstop = comparable.filter((flight) => flight.stops === 0)
@@ -28,6 +31,88 @@ function flightSummary(result: TravelResult) {
   if (premium < 0.005)
     return `A nonstop ${leg} is available at the lowest listed ${scope} fare of ${formatFare(lowest)}.`
   return `Fares start at ${formatFare(lowest)} ${scope}, with a nonstop ${leg} for ${formatFare(premium)} more.`
+}
+
+function FlightOptions({
+  result,
+  interactive,
+}: {
+  result: TravelResult
+  interactive: boolean
+}) {
+  const [sortByFare, setSortByFare] = useState(false)
+  const [nonstopOnly, setNonstopOnly] = useState(false)
+  const oneWay = result.is_one_way
+  const flights = nonstopOnly
+    ? result.flights.filter(
+        (flight) =>
+          flight.stops === 0 && (oneWay || flight.return_flight?.stops === 0),
+      )
+    : result.flights
+  const visibleFlights = sortByFare
+    ? [...flights].sort((left, right) => {
+        const a = comparableFare(left, oneWay) ?? Infinity
+        const b = comparableFare(right, oneWay) ?? Infinity
+        return a === b ? 0 : a < b ? -1 : 1
+      })
+    : flights
+
+  return (
+    <div className="space-y-2">
+      {result.kind !== "flight_only" && (
+        <h4 className="font-semibold text-white">Flights</h4>
+      )}
+      {interactive && (
+        <div
+          role="group"
+          aria-label="Compare returned flights"
+          className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-gray-200"
+        >
+          <label className="flex min-h-10 items-center gap-2">
+            Sort by
+            <select
+              className="rounded-md border border-white/20 bg-[#252525] px-2 py-2 text-white focus-visible:outline-2 focus-visible:outline-emerald-300"
+              onChange={(event) =>
+                setSortByFare(event.currentTarget.value === "fare")
+              }
+              value={sortByFare ? "fare" : "original"}
+            >
+              <option value="original">Original order</option>
+              <option value="fare">Lowest fare</option>
+            </select>
+          </label>
+          <label className="flex min-h-10 cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={nonstopOnly}
+              onChange={(event) => setNonstopOnly(event.currentTarget.checked)}
+              className="h-4 w-4 accent-emerald-400 focus-visible:outline-2 focus-visible:outline-emerald-300"
+            />
+            {oneWay ? "Nonstop only" : "Nonstop both ways"}
+          </label>
+        </div>
+      )}
+      {!visibleFlights.length && (
+        <p role="status" className="text-sm text-gray-300">
+          {oneWay
+            ? "No nonstop options in these results."
+            : "No options in these results are nonstop both ways."}
+        </p>
+      )}
+      {visibleFlights.map((flight) => (
+        <FlightOptionCard
+          key={flight.id}
+          leg={flight}
+          quote={{
+            state: "complete",
+            fare: flight.total_usd,
+            oneWay,
+            returned: flight.return_flight,
+          }}
+        />
+      ))}
+    </div>
+  )
 }
 
 const accommodationReasonLabels: Record<string, string> = {
@@ -68,8 +153,10 @@ const humanizeEvidenceSource = (source: string) => {
 
 export default function StructuredTravelResultCard({
   result,
+  allowFlightControls = false,
 }: {
   result: TravelResult
+  allowFlightControls?: boolean
 }) {
   const heading = {
     full_trip: "Your trip",
@@ -121,23 +208,14 @@ export default function StructuredTravelResultCard({
         </p>
       )}
       {result.flights.length > 0 && (
-        <div className="space-y-2">
-          {result.kind !== "flight_only" && (
-            <h4 className="font-semibold text-white">Flights</h4>
-          )}
-          {result.flights.map((flight) => (
-            <FlightOptionCard
-              key={flight.id}
-              leg={flight}
-              quote={{
-                state: "complete",
-                fare: flight.total_usd,
-                oneWay: result.is_one_way,
-                returned: flight.return_flight,
-              }}
-            />
-          ))}
-        </div>
+        <FlightOptions
+          result={result}
+          interactive={
+            allowFlightControls &&
+            result.kind === "flight_only" &&
+            result.flights.length > 1
+          }
+        />
       )}
       {result.kind === "airport_comparison" && (
         <div className="space-y-2">

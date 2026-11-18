@@ -84,7 +84,9 @@ test("structured cards survive rewritten narrative and reload", async ({
     page.getByText("Narrative wording changed after search."),
   ).toBeVisible()
   await page.reload()
-  await page.getByRole("button", { name: "Plan Dallas to New York" }).click()
+  await page
+    .getByRole("button", { name: "Plan Dallas to New York", exact: true })
+    .click()
   await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
 })
 
@@ -341,7 +343,7 @@ test("nearby arrival airports compare real fares and ground distance", async ({
   await expect(cards.getByText(/lower airfare than SBP/).first()).toBeVisible()
   await page.reload()
   await page
-    .getByRole("button", { name: /Flights only from Dallas to SBP/ })
+    .getByRole("button", { name: /^Flights only from Dallas to SBP/ })
     .click()
   await expect(cards.getByText(/LAX · Los Angeles/)).toBeVisible()
 })
@@ -373,7 +375,7 @@ test("flight explanation and nearby dates remain grounded after reload", async (
   expect(why.response).toContain("USD 240.00")
   await page.reload()
   await page
-    .getByRole("button", { name: /Flights only from Dallas to New Yor/ })
+    .getByRole("button", { name: /^Flights only from Dallas to New Yor/ })
     .click()
   await expect(page.getByText("Nearby travel dates")).toBeVisible()
 })
@@ -392,7 +394,7 @@ test("hotel failure keeps flights and retries hotels after reload", async ({
   await expect(page.getByRole("button", { name: "Retry hotels" })).toBeVisible()
   await page.reload()
   await page
-    .getByRole("button", { name: /Plan Dallas to New York with transi/ })
+    .getByRole("button", { name: /^Plan Dallas to New York with transi/ })
     .click()
   const response = page.waitForResponse((reply) =>
     reply.url().endsWith("/agent/prompt/stream"),
@@ -420,9 +422,7 @@ test("Stop ignores late hotel results", async ({ page }) => {
     }),
   ).toBeVisible()
   await page.getByRole("button", { name: "Stop", exact: true }).click()
-  await expect(
-    page.getByText("Search stopped. Late results will be ignored."),
-  ).toBeVisible()
+  await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await page.waitForTimeout(3500)
   await expect(page.getByText("Fixture Central Hotel")).toHaveCount(0)
 })
@@ -463,7 +463,9 @@ test("keeps the selected flight while changing only the hotel after reload", asy
   expect(first.recommendation.hotel.name).toBe("Fixture Central Hotel")
   const flightId = first.recommendation.flight.id
   await page.reload()
-  await page.getByRole("button", { name: "Plan Dallas to New York" }).click()
+  await page
+    .getByRole("button", { name: "Plan Dallas to New York", exact: true })
+    .click()
   const swapped = await send(page, "Keep the flights, change the hotel")
   expect(swapped.recommendation.flight.id).toBe(flightId)
   expect(swapped.recommendation.hotel.name).toBe("Fixture Riverside Hotel")
@@ -514,6 +516,95 @@ test("clarifies, searches real agents, reloads and corrects the destination", as
   await expect(page.getByText(/Fixture Central Hotel/).last()).toBeVisible()
 })
 
+test("trip details reflect clarification, and edits require review in the active chat", async ({
+  page,
+}) => {
+  await page.goto("/")
+  const summary = page.getByRole("region", { name: "Trip details" })
+  let searchRequests = 0
+  page.on("request", (request) => {
+    if (
+      request.method() === "POST" &&
+      request.url().endsWith("/agent/prompt/stream")
+    )
+      searchRequests++
+  })
+  const first = await send(page, "Flights only to New York")
+  await expect(summary).toContainText("Origin not set → JFK")
+  await expect(summary).toContainText("Not set")
+  await summary.getByRole("button", { name: "Change dates" }).click()
+  await summary.getByRole("button", { name: "Cancel" }).click()
+  expect(searchRequests).toBe(1)
+
+  await send(page, `Dallas ${start} to ${end}`)
+  await expect(summary).toContainText("DFW → JFK")
+  await summary.getByRole("button", { name: "Change dates" }).click()
+  const dateReview = summary.getByRole("form", { name: "Review dates" })
+  await expect(dateReview.getByLabel("Departure")).toHaveValue(start)
+  await dateReview.getByRole("button", { name: "Search with changes" }).click()
+  await expect(dateReview.getByRole("alert")).toContainText(
+    "Choose a different date",
+  )
+  expect(searchRequests).toBe(2)
+
+  const nextStart = new Date(Date.now() + 61 * 86400000)
+    .toISOString()
+    .slice(0, 10)
+  await dateReview.getByLabel("Departure").fill(nextStart)
+  const dateResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/agent/prompt/stream"),
+  )
+  await dateReview.getByRole("button", { name: "Search with changes" }).click()
+  const changed = await observedStreamResult(page, await dateResponse)
+  expect(changed.conversation_id).toBe(first.conversation_id)
+  expect(changed.trip_state).toMatchObject({
+    origin: "DFW",
+    destination: "JFK",
+    start_date: nextStart,
+    end_date: end,
+  })
+
+  await summary.getByRole("button", { name: "Edit travelers" }).click()
+  const travelerReview = summary.getByRole("form", { name: "Review travelers" })
+  await travelerReview.getByLabel("Adults").fill("2")
+  await travelerReview.getByLabel("Children").selectOption("1")
+  await travelerReview.getByLabel("Child 1 age").fill("7")
+  const partyResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/agent/prompt/stream"),
+  )
+  await travelerReview
+    .getByRole("button", { name: "Search with changes" })
+    .click()
+  const party = await observedStreamResult(page, await partyResponse)
+  expect(party.trip_state).toMatchObject({
+    start_date: nextStart,
+    adults: 2,
+    children: 1,
+    children_ages: [7],
+  })
+  await expect(summary).toContainText("2 adults · 1 child")
+  expect(searchRequests).toBe(4)
+
+  await summary.getByRole("button", { name: "Change dates" }).click()
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await expect(summary).toHaveCount(0)
+  await page
+    .getByRole("button", { name: "Flights only to New York", exact: true })
+    .click()
+  await expect(summary).toContainText("2 adults · 1 child")
+  await expect(dateReview).toHaveCount(0)
+  await page.reload()
+  await page
+    .getByRole("button", { name: "Flights only to New York", exact: true })
+    .click()
+  await expect(summary).toContainText("DFW → JFK")
+  await expect(summary).toContainText("2 adults · 1 child")
+})
+
 test("a late answer stays with its chat and new chats start without trip context", async ({
   page,
 }) => {
@@ -548,9 +639,16 @@ test("deleting a chat clears the browser and permanently deletes its server memo
 }) => {
   await page.goto("/")
   const result = await send(page, "Plan Tokyo.")
-  await page
-    .getByRole("button", { name: "Delete chat: Plan Tokyo.", exact: true })
-    .click()
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "Plan Tokyo.", exact: true }).focus()
+  await page.keyboard.press("Tab")
+  const deleteChat = page.getByRole("button", {
+    name: "Delete chat: Plan Tokyo.",
+    exact: true,
+  })
+  await expect(deleteChat).toBeFocused()
+  await expect(deleteChat).toHaveCSS("opacity", "1")
+  await page.keyboard.press("Enter")
   await expect(
     page.getByRole("button", { name: "Plan Tokyo.", exact: true }),
   ).toHaveCount(0)
@@ -676,7 +774,7 @@ test("family counts survive clarification and reload and change quoted totals", 
     page.getByText(/Travelers: 2 adults, 1 child/).last(),
   ).toBeVisible()
   await page.reload()
-  await page.getByRole("button", { name: /Plan New York from Dallas/ }).click()
+  await page.getByRole("button", { name: /^Plan New York from Dallas/ }).click()
   const correction = await send(page, "Actually Boston")
   expect(correction.trip_state).toMatchObject({
     destination: "BOS",

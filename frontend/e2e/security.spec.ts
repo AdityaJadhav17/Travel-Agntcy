@@ -53,9 +53,7 @@ test("local access key unlocks the travel app without being persisted", async ({
   const keyField = page.getByLabel("Local access key")
   await keyField.fill("local-test-key")
   await page.getByRole("button", { name: "Unlock app" }).click()
-  await expect(
-    page.getByRole("heading", { name: "How can I help you plan your trip?" }),
-  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Plan a trip" })).toBeVisible()
   expect(submittedKey).toBe("local-test-key")
   const browserStorage = await page.evaluate(() =>
     JSON.stringify({ local: localStorage, session: sessionStorage }),
@@ -63,9 +61,7 @@ test("local access key unlocks the travel app without being persisted", async ({
   expect(browserStorage).not.toContain("local-test-key")
 
   await page.reload()
-  await expect(
-    page.getByRole("heading", { name: "How can I help you plan your trip?" }),
-  ).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Plan a trip" })).toBeVisible()
   await page.getByRole("button", { name: "Sign out" }).click()
   await expect(page.getByLabel("Local access key")).toBeVisible()
 })
