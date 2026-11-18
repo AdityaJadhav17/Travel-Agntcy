@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 
 import httpx
 import pytest
@@ -73,6 +75,71 @@ def test_lifespan_reuses_client_without_query_state_or_cookies(monkeypatch):
             ]
     asyncio.run(scenario())
     assert len(clients) == 1 and clients[0].closed == 1
+
+
+def test_return_lookup_times_headers_and_body_without_logging_request_data(monkeypatch, caplog):
+    class Body(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            assert "return_lookup_headers" in caplog.text
+            assert "return_lookup_body" not in caplog.text
+            yield b'{"best_flights":[]}'
+
+    async def respond(request):
+        assert request.url.params["departure_token"] == "fixture-token"
+        assert request.url.params["api_key"] == "fixture-key"
+        return httpx.Response(200, stream=Body())
+
+    async def scenario():
+        async with pool.provider_http_lifespan():
+            return await serp._request_provider({
+                "engine": "google_flights", "departure_token": "fixture-token", "api_key": "fixture-key",
+            })
+
+    monkeypatch.setattr(pool, "_new_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(respond)))
+    with caplog.at_level(logging.INFO, logger="lungo.travel.timing"):
+        assert asyncio.run(scenario()) == {"best_flights": []}
+
+    records = [
+        json.loads(record.getMessage().removeprefix("travel_timing "))
+        for record in caplog.records
+        if record.name == "lungo.travel.timing"
+    ]
+    assert [(record["stage"], record["category"]) for record in records] == [
+        ("provider_queue", "provider"),
+        ("return_lookup_headers", "provider_http"),
+        ("return_lookup_body", "provider_http"),
+        ("return_lookup", "provider"),
+    ]
+    assert all(record["outcome"] == "success" for record in records)
+    assert "fixture-token" not in caplog.text
+    assert "fixture-key" not in caplog.text
+
+
+def test_cancelled_return_lookup_closes_response(monkeypatch):
+    async def scenario():
+        reading = asyncio.Event()
+        closed = asyncio.Event()
+
+        class SlowBody(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                reading.set()
+                await asyncio.Future()
+                yield b"{}"
+
+            async def aclose(self):
+                closed.set()
+
+        transport = httpx.MockTransport(lambda _: httpx.Response(200, stream=SlowBody()))
+        monkeypatch.setattr(pool, "_new_client", lambda: httpx.AsyncClient(transport=transport))
+        async with pool.provider_http_lifespan():
+            task = asyncio.create_task(serp._request_search({"departure_token": "fixture-token"}))
+            await asyncio.wait_for(reading.wait(), timeout=2)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert closed.is_set()
+
+    asyncio.run(scenario())
 
 
 def test_each_event_loop_gets_and_closes_its_own_client(monkeypatch):

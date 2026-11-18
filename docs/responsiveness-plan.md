@@ -177,6 +177,40 @@ Acceptance: flight/hotel reverse failures, cancellation, empty/incompatible stay
 budget and party constraints, activity opt-out, persistence and browser tests.
 Do not use the flight-only sample to claim a combined-trip speedup.
 
+## Return lookup investigation
+
+In the four-search browser comparison, each first search had three overlapping
+return lookups. The earliest return arrived 6.68 s before the slowest on
+DFW–LGA and 7.48 s before the slowest on SFO–SAN. On repeat searches the
+slowest lookups took about 0.08 s. SerpAPI documents an exact-query cache, which
+is consistent with the difference, but the samples did not identify cache
+hits. SerpAPI uses a separate departure-token request for each outbound
+itinerary whose return options must be retrieved.
+[SerpAPI Google Flights documentation](https://serpapi.com/google-flights-api)
+
+The flight agent records `return_lookup_headers` (send through response
+headers) and `return_lookup_body` (read and decompress the body) under
+`provider_http`. Compare these to the parent `return_lookup` span by request ID.
+The header span includes connection setup and provider wait. Continue to count
+only the parent span as a provider lookup. The records contain durations,
+outcomes and opaque request IDs.
+
+Run the credential-free scaled-delay fixture with
+`python scripts/benchmark_travel_latency.py --samples 12 --return-delays-ms 185 428 934 --caps 1 2 3 6`
+inside the CI Python image. `first_return_ready_ms` is the first fixture
+provider response, measured before rendering. The final result still waits for
+all three token lookups. Across 12 samples per cap, median enrichment was
+1,550 ms at cap 1, 1,121 ms at cap 2, and 936 ms at both cap 3 and cap 6. The
+first return was ready in about 186 ms. Every search made four provider calls
+and returned all three token-matched round-trip quotes.
+
+The next UX experiment is to stream the first priced round-trip itinerary as
+soon as its return is verified, labeled as an early option while more fares
+are checked. Compare the first verified card separately from the final result.
+Keep the final ranking and the existing rules for budgets, recommendations,
+hotel compatibility, cancellation and saves. A work-in-progress card must
+never be presented as the cheapest complete set.
+
 ## Release and measurement gates
 
 Each phase gets an independent diff and rollback. Keep limits, authentication,
