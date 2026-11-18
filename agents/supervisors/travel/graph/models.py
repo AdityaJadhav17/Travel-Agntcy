@@ -11,7 +11,7 @@ proper parsing of user travel requests.
 
 from pydantic import BaseModel, Field
 from typing import Optional, Literal
-from agents.travel.flight_timing import FlightTiming
+from agents.travel.flight_timing import ClockClarification, FlightTiming
 from agents.travel.party import TravelParty
 
 
@@ -56,6 +56,9 @@ class TravelSearchArgs(TravelParty):
     hotel_result_count: Optional[int] = Field(default=None, ge=1, le=100, strict=True, description="Requested hotel options to display; maximum five are supported")
     activity_result_count: Optional[int] = Field(default=None, ge=1, le=100, strict=True, description="Requested activity options to display; maximum five are supported")
     flight_timing: FlightTiming | None = Field(default=None, description="Airport-local flight time windows and departure comparison; null when all are cleared")
+    pending_flight_clock: ClockClarification | None = Field(
+        default=None, description="Reserved for the app's clarification state; always return null when extracting",
+    )
     accommodation_type: Optional[Literal["hotel", "hostel", "any"]] = Field(default=None, description="Explicitly allowed accommodation category")
     private_room_required: Optional[bool] = Field(default=None, description="Whether an explicitly private room is required")
     hotel_check_in_date: Optional[str] = Field(default=None, description="Explicit hotel check-in date in YYYY-MM-DD format")

@@ -70,6 +70,28 @@ test("flight time follow-ups keep the trip and show matching quotes", async ({
   ).toBeVisible()
   const relaxed = await send(page, "Any time")
   expect(relaxed.travel_result.flights).toHaveLength(3)
+
+  const ambiguous = await send(page, "After 7")
+  expect(ambiguous.travel_result).toBeFalsy()
+  await expect(page.getByText(/7 a\.m\. or 7 p\.m\./)).toBeVisible()
+  const resolved = await send(page, "PM")
+  expect(resolved.travel_result.flights).toMatchObject([
+    { departure_time: `${start} 19:00` },
+  ])
+
+  const nearby = await send(
+    page,
+    "Show cheaper dates, but only evening flights",
+  )
+  expect(nearby.travel_result).toMatchObject({
+    kind: "date_comparison",
+    start_date: start,
+    notice: expect.stringContaining("18:00–24:00"),
+  })
+  expect(nearby.travel_result.date_alternatives).toHaveLength(7)
+  for (const option of nearby.travel_result.date_alternatives) {
+    expect(option.flight.departure_time).toBe(`${option.departure_date} 19:00`)
+  }
 })
 
 test("structured cards survive rewritten narrative and reload", async ({

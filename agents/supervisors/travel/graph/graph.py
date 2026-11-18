@@ -36,12 +36,15 @@ from ioa_observe.sdk.decorators import agent, graph
 from agents.supervisors.travel.graph.tools import get_flights_via_a2a, get_hotels_via_a2a, get_activities_via_a2a
 from agents.travel.travel_logic import find_cheapest_plan
 from agents.travel.flight_timing import (
-    FlightTiming, TIME_CLARIFICATION, departure_period, simple_timing_edit,
+    ClockClarification, FlightSearchTiming, FlightTiming, LocalWindow, OutboundSelection,
+    TIME_CLARIFICATION, departure_period, local_minutes, simple_timing_edit,
 )
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
-from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, capture_flight_recommendation, explain_recommendation, quote_facts
-from agents.supervisors.travel.graph.travel_results import travel_result, airport_comparison_result, date_comparison_result
+from agents.supervisors.travel.graph.recommendations import FlightRecommendation, Recommendation, capture_recommendation, capture_flight_recommendation, explain_recommendation, quote_facts
+from agents.supervisors.travel.graph.travel_results import (
+    PARTIAL_RETURN_NOTICE, travel_result, airport_comparison_result, date_comparison_result,
+)
 from agents.supervisors.travel.graph.presentation_selection import select_for_presentation, explicit_requested_count
 from agents.supervisors.travel.graph.nearby_airports import airport_catalog, nearby_arrivals, NearbyAirport
 from agents.supervisors.travel.graph.partial_searches import PartialSearch, retain_flights
@@ -78,6 +81,7 @@ class NodeStates:
     HOTEL_CHANGE = "change_hotel"
     HOTEL_RETRY = "retry_hotels"
     DATE_COMPARE = "compare_dates"
+    RETURN_COMPARE = "compare_returns"
     REFLECTION = "reflection"
 
 
@@ -166,6 +170,7 @@ class TravelGraph:
         workflow.add_node(NodeStates.HOTEL_CHANGE, self._change_hotel_node)
         workflow.add_node(NodeStates.HOTEL_RETRY, self._retry_hotels_node)
         workflow.add_node(NodeStates.DATE_COMPARE, self._compare_dates_node)
+        workflow.add_node(NodeStates.RETURN_COMPARE, self._compare_returns_node)
         workflow.add_node(NodeStates.REFLECTION, self._reflection_node)
 
         # --- 2. Define the Agentic Workflow ---
@@ -182,6 +187,7 @@ class TravelGraph:
                 NodeStates.HOTEL_CHANGE: NodeStates.HOTEL_CHANGE,
                 NodeStates.HOTEL_RETRY: NodeStates.HOTEL_RETRY,
                 NodeStates.DATE_COMPARE: NodeStates.DATE_COMPARE,
+                NodeStates.RETURN_COMPARE: NodeStates.RETURN_COMPARE,
             },
         )
 
@@ -194,6 +200,7 @@ class TravelGraph:
         workflow.add_edge(NodeStates.HOTEL_CHANGE, END)
         workflow.add_edge(NodeStates.HOTEL_RETRY, END)
         workflow.add_edge(NodeStates.DATE_COMPARE, END)
+        workflow.add_edge(NodeStates.RETURN_COMPARE, END)
 
         # Reflection decides whether to continue or end
         workflow.add_conditional_edges(
@@ -229,16 +236,29 @@ class TravelGraph:
             except ValidationError:
                 pass
             else:
-                if (edit := simple_timing_edit(latest, trip.flight_timing or FlightTiming())) is not None:
-                    if isinstance(edit, str):
+                current = trip.flight_timing or FlightTiming()
+                pending = trip.pending_flight_clock
+                resolved = pending.resolve(latest, current) if pending else None
+                edit = resolved if resolved is not None else simple_timing_edit(latest, current)
+                if edit is not None:
+                    if isinstance(edit, ClockClarification):
+                        trip.pending_flight_clock = edit
+                        trip.clarification_question = edit.question()
+                    elif isinstance(edit, str):
+                        trip.pending_flight_clock = None
                         trip.clarification_question = edit
                     else:
+                        trip.pending_flight_clock = None
                         trip.flight_timing = edit
                         if trip.clarification_question.startswith(TIME_CLARIFICATION):
                             trip.clarification_question = ""
                     emit("status", component="request", message="Updating flight times")
+                    if resolved is not None and pending.compare_dates:
+                        return {"next_node": NodeStates.DATE_COMPARE, "combined_search_params": trip}
                     return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None,
                             "partial_search": None, "combined_search_params": trip, "timing_edit": True}
+        if isinstance(latest, str) and self._return_refinement(latest) is not None:
+            return {"next_node": NodeStates.RETURN_COMPARE}
         if isinstance(latest, str) and self._nearby_arrival_request(latest):
             return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None, "partial_search": None}
         if isinstance(latest, str) and latest.strip().lower().rstrip("?.!") == "retry hotels":
@@ -420,7 +440,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
     async def _compare_dates_node(self, state: GraphState) -> dict:
         """Price the saved route on up to seven dates without changing the trip."""
         try:
-            trip = TravelSearchArgs.model_validate(state.get("search_params") or {})
+            trip = state.get("combined_search_params") or TravelSearchArgs.model_validate(state.get("search_params") or {})
             start = date.fromisoformat(trip.start_date)
             returned = date.fromisoformat(trip.end_date) if not trip.is_one_way else None
         except (ValidationError, ValueError, TypeError):
@@ -433,6 +453,44 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         if returned and returned <= start:
             return self._quoted_response(
                 "The saved return date must be after departure. What return date should I use?")
+
+        latest = next((m.content for m in reversed(state.get("messages", [])) if m.type == "human"), "")
+        if isinstance(latest, str) and state.get("combined_search_params") is None:
+            if trip.pending_flight_clock:
+                trip.pending_flight_clock = None
+                if trip.clarification_question.startswith(TIME_CLARIFICATION):
+                    trip.clarification_question = ""
+            timing_cue = re.search(
+                r"\b(?:morning|afternoon|evening|midnight|noon|red[- ]eye|time of day)\b"
+                r"|\b(?:depart|leave|arrive|land|return)\s+(?:after|before|between)\b"
+                r"|\b(?:after|before|between)\s+\d", latest, re.IGNORECASE,
+            )
+            if timing_cue:
+                current = trip.flight_timing or FlightTiming()
+                clauses = re.split(r",\s*(?:(?:but|and)\s+)?|\s+(?:but|and)\s+", latest,
+                                   maxsplit=1, flags=re.IGNORECASE)
+                edit = simple_timing_edit(clauses[-1], current) if len(clauses) == 2 else None
+                if isinstance(edit, ClockClarification):
+                    trip.pending_flight_clock = edit.model_copy(update={"compare_dates": True})
+                    trip.clarification_question = edit.question()
+                elif isinstance(edit, FlightTiming):
+                    trip.flight_timing = edit
+                else:
+                    try:
+                        extracted = await asyncio.wait_for(
+                            self._extract_travel_params(self._extraction_context(state, latest)), timeout=15,
+                        )
+                        trip.clarification_question = extracted.clarification_question
+                        if extracted.flight_timing is not None:
+                            trip.flight_timing = extracted.flight_timing
+                        elif not trip.clarification_question:
+                            trip.clarification_question = "What local flight time should I use for the date comparison?"
+                    except Exception:
+                        trip.clarification_question = "What local flight time should I use for the date comparison?"
+                if trip.clarification_question:
+                    return {**self._quoted_response(trip.clarification_question), "search_params": trip.model_dump()}
+        if trip.is_one_way and trip.flight_timing and trip.flight_timing.has_return_timing():
+            return self._quoted_response("This trip is one-way. Which outbound time should I use for the date comparison?")
 
         dates = [(start + timedelta(days=offset),
                   returned + timedelta(days=offset) if returned else None)
@@ -470,14 +528,20 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     matching.append((flight, price))
             if not matching:
                 return None
+            if trip.flight_timing and trip.flight_timing.outbound_departure_fallback:
+                preferred = [item for item in matching if trip.flight_timing.preferred_outbound(item[0])]
+                matching = preferred or matching
             quote, price = min(matching, key=lambda item: item[1])
             return departure.isoformat(), return_date.isoformat() if return_date else "", quote, price
 
         quoted = [item for item in await asyncio.gather(*(search(*pair) for pair in dates)) if item]
         if not quoted:
-            return self._quoted_response(
+            timing = trip.flight_timing.window_summary() if trip.flight_timing else ""
+            return {**self._quoted_response(
                 f"I checked {len(dates)} nearby date option(s) for {trip.origin} to {trip.destination}, "
-                "but couldn't verify a complete USD fare. Try another date range.")
+                "but couldn't verify a complete USD fare"
+                + (f" for {timing} (local time)." if timing else ". Try another date range.")),
+                    "search_params": trip.model_dump()}
         result = date_comparison_result(trip, quoted)
         baseline = result["base_fare_usd"]
         lines = [f"**Nearby-date airfare comparison: {trip.origin} → {trip.destination}**",
@@ -495,7 +559,80 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         response = "\n\n".join(lines[:3]) + "\n" + "\n".join(lines[3:])
         emit("result", component="flights", travel_result=result)
         return {"messages": [AIMessage(content=response)], "full_response": response,
-                "travel_result": result}
+                "travel_result": result, "search_params": trip.model_dump()}
+
+    @staticmethod
+    def _return_refinement(text: str) -> str | None:
+        request = re.fullmatch(
+            r"(?:please )?(?:keep|use) (?:(?:the same|the|my|that|same) )?outbound(?: flight| leg)?"
+            r"(?:[.,;]\s*(?:and )?|\s+and\s+)(?:show me |find |compare |give me )?(.+)",
+            " ".join(text.lower().strip(" .?!").split()),
+        )
+        if request and re.search(r"\b(?:return|returns|inbound|way back)\b", request[1]):
+            return request[1]
+        return None
+
+    async def _compare_returns_node(self, state: GraphState) -> dict:
+        latest = next(m.content for m in reversed(state["messages"]) if m.type == "human")
+        refinement = self._return_refinement(latest)
+        saved = state.get("recommendation") or {}
+        try:
+            trip = TravelSearchArgs.model_validate(state.get("search_params") or {})
+            recommendation = (FlightRecommendation.model_validate(saved) if saved.get("version") == 3
+                              else Recommendation.model_validate(saved))
+            itinerary = (recommendation.itinerary if isinstance(recommendation, FlightRecommendation)
+                         else recommendation.flight_itinerary)
+            pinned = OutboundSelection.model_validate(itinerary.model_dump() if itinerary else {})
+        except (ValidationError, AttributeError):
+            return self._quoted_response(
+                "I need a round-trip flight from your recent results before I can keep the outbound. Which trip should I search?")
+        if (trip.is_one_way or not itinerary.return_flight or
+                (trip.origin, trip.destination, trip.start_date, trip.end_date) !=
+                (recommendation.trip.origin, recommendation.trip.destination,
+                 recommendation.trip.start_date, recommendation.trip.end_date)):
+            return self._quoted_response(
+                "I need a complete round-trip fare for your current dates before I can keep the outbound and compare returns.")
+        if party_question := trip.question("flight_only"):
+            return self._quoted_response(party_question)
+
+        timing = trip.flight_timing or FlightTiming()
+        if refinement in {"later return", "later returns", "later return flights", "later on the way back"}:
+            previous = local_minutes(itinerary.return_flight.departure_time)
+            if previous is None or previous == 1439:
+                return self._quoted_response("What local departure time should I look for on the return?")
+            hour, minute = divmod(previous + 1, 60)
+            timing = timing.model_copy(update={
+                "return_departure": LocalWindow(start=f"{hour:02d}:{minute:02d}", end="24:00"),
+                "compare_departures": "return", "comparison_periods": [],
+            })
+        elif refinement in {"other returns", "different returns", "return options", "other return flights"}:
+            timing = timing.model_copy(update={
+                "return_departure": None, "compare_departures": "return", "comparison_periods": [],
+            })
+        else:
+            refinement = re.sub(r"^returns?\s+", "return ", refinement)
+            edit = simple_timing_edit(
+                refinement if refinement.startswith(("return ", "inbound ")) else f"{refinement} for the return",
+                timing,
+            )
+            if not isinstance(edit, FlightTiming):
+                return self._quoted_response(
+                    "What local time should I use for the return? For example, “Keep the outbound and show returns after 6 p.m.”")
+            timing = edit.model_copy(update={"compare_departures": "return"})
+
+        timing = FlightSearchTiming(**timing.model_dump(), pinned_outbound=pinned)
+        flight_params = trip.model_copy(update={"search_type": "flight_only", "flight_timing": timing})
+        full_trip = trip.search_type == "full_trip"
+        if full_trip:
+            flight_params.budget_amount = None
+        result = await self._handle_flight_only_search(flight_params, comparison_for_trip=full_trip)
+        if not result.get("travel_result"):
+            return result
+        trip.flight_timing = FlightTiming.model_validate(timing.model_dump(exclude={"pinned_outbound"}))
+        trip.pending_flight_clock = None
+        if trip.clarification_question.startswith(TIME_CLARIFICATION):
+            trip.clarification_question = ""
+        return {**result, "search_params": trip.model_dump()}
 
     @staticmethod
     def _nearby_arrival_request(message: str) -> bool:
@@ -643,10 +780,18 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                         "partial_search": None}
         hotel_check_in = params.hotel_check_in_date or params.start_date
         hotel_check_out = params.hotel_check_out_date or checkout or params.end_date
-        plan = find_cheapest_plan(flights, hotels,
-                                  check_in_date=hotel_check_in, check_out_date=hotel_check_out,
-                                  accommodation_type=params.accommodation_type,
-                                  private_room_required=params.private_room_required)
+        plan_options = {
+            "check_in_date": hotel_check_in, "check_out_date": hotel_check_out,
+            "accommodation_type": params.accommodation_type,
+            "private_room_required": params.private_room_required,
+        }
+        preferred = params.flight_timing.prefer_matching_flights(flights) if params.flight_timing else flights
+        plan = find_cheapest_plan(preferred, hotels, **plan_options)
+        if preferred != flights:
+            if not plan or (params.budget_amount and
+                             quote_total(plan["flight"], "flight", params) + quote_total(plan["hotel"], "hotel", params)
+                             > params.budget_amount):
+                plan = find_cheapest_plan(flights, hotels, **plan_options)
         if not plan:
             response = (f"I found {len(flights)} flights and {len(hotels)} hotels, but couldn't find a valid combination. "
                         "The separate flight and hotel quotes are still available above.\n\n"
@@ -688,12 +833,17 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 notes.append("The provider did not confirm the accommodation type.")
             response = ("This flight and hotel pairing is provisional. " + " ".join(notes) +
                         " Confirm these details with the property before relying on it.\n\n" + response)
+        flight_notice = self._flight_timing_notice(params, [plan["flight"]])
+        if flight_notice:
+            response += "\n\n" + flight_notice
+        if plan["flight"].get("return_lookup_incomplete"):
+            response += "\n\n" + PARTIAL_RETURN_NOTICE
         return {**self._quoted_response(response, summary),
                 "recommendation": capture_recommendation(plan, params),
                 "travel_result": travel_result("full_trip", params, flights=[plan["flight"]],
                                                hotels=[plan["hotel"]], activities=activities,
                                                hotel_check_in_date=hotel_check_in,
-                                               hotel_check_out_date=hotel_check_out),
+                                               hotel_check_out_date=hotel_check_out, notice=flight_notice),
                 "partial_search": None}
 
     @staticmethod
@@ -852,6 +1002,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             params.search_type = "flight_only"
         saved = state.get("search_params") or {}
         if not state.get("timing_edit"):
+            params.pending_flight_clock = None
             params = self._apply_explicit_scope(params, str(user_msg.content), saved)
             if (params.flight_timing is None and saved.get("flight_timing")
                     and (params.origin, params.destination, params.is_one_way)
@@ -1141,6 +1292,9 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         
         trip_type = "one-way" if params.is_one_way else "round-trip"
         logger.info(f"Searching {trip_type} flights only: {params.origin} -> {params.destination}")
+        timing = params.flight_timing
+        pinned = timing.pinned_outbound if isinstance(timing, FlightSearchTiming) else None
+        flexible = bool(timing and timing.outbound_departure_fallback)
         
         try:
             emit("status", component="flights", message="Searching flights")
@@ -1151,7 +1305,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
                 party=params,
-                allow_preview=True,
+                allow_preview=not flexible,
                 **params.flight_search_options(),
                 **({"allow_verified_preview": True}
                    if params.budget_amount is None
@@ -1159,7 +1313,18 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                    else {}),
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
-            if not flights and params.flight_timing:
+            if pinned:
+                flights = [
+                    flight for flight in flights
+                    if pinned.matches(flight) and (returned := flight.get("return_flight"))
+                    and returned.get("departure_code") == params.destination
+                    and returned.get("arrival_code") == params.origin
+                    and str(returned.get("departure_time", ""))[:10] == params.end_date
+                ]
+            if not flights and pinned:
+                return self._quoted_response(
+                    "I couldn't verify a matching return with the same outbound. Try another return window or date.")
+            if not flights and timing:
                 return self._flight_timing_no_matches(params)
             summary = None
             if params.budget_amount is not None:
@@ -1168,12 +1333,18 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     return self._quoted_response("Try different dates or revise your quoted-cost budget.", summary)
             if not flights:
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination} for {params.start_date}. Please try different dates.")]}
+            if flexible:
+                flights = timing.prefer_matching_flights(flights)
             
             selected_flights, _ = select_for_presentation(flights, params.flight_result_count, limit=5)
             notice = self._flight_timing_notice(params, selected_flights)
+            if pinned:
+                notice = "Same outbound as your saved recommendation. " + notice
             if comparison_for_trip:
                 notice = "Flight fares only. Hotel prices are separate. " + notice
             response = self._format_flights_only(flights, params)
+            if any(flight.get("return_lookup_incomplete") for flight in selected_flights):
+                response += "\n\n" + PARTIAL_RETURN_NOTICE
             if notice:
                 response += "\n\n" + notice
             cards = travel_result("flight_only", params, flights=flights, notice=notice)
@@ -1203,6 +1374,11 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         if not timing:
             return ""
         window = timing.window_summary()
+        if timing.outbound_departure_fallback and timing.outbound_departure and shown:
+            alternate = timing.outbound_departure_fallback
+            if not any(timing.preferred_outbound(flight) for flight in shown):
+                return (f"No preferred fare met the search constraints. Showing your accepted fallback, "
+                        f"{alternate.start}–{alternate.end} local departure.")
         notes = [f"Local time · {window}."] if window else []
         if timing.compare_departures:
             leg = timing.compare_departures
@@ -1362,7 +1538,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 params.end_date if not params.is_one_way else None,
                 is_one_way=params.is_one_way,
                 party=params,
-                allow_preview=True,
+                allow_preview=not bool(params.flight_timing and params.flight_timing.outbound_departure_fallback),
                 **params.flight_search_options(),
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
@@ -1518,6 +1694,10 @@ and return an empty flight_timing object on a clear-all request. Use null if the
 was no requested timing. For a time with ambiguous
 AM/PM or 'earlier/later' without a reference, ask one targeted question. Keep the
 route, dates, party, budget and search type for timing-only refinements.
+Use outbound_departure_fallback only when the traveler accepts a second
+departure window: 'evening if possible, afternoon is fine' means outbound_departure
+18:00–24:00 and outbound_departure_fallback 12:00–18:00. A hard time change clears
+any superseded fallback. Always return null for pending_flight_clock; the app manages it.
 If a user switches from round-trip to one-way, drop the return windows and any
 return comparison unless the new request still explicitly mentions a return.
 Extract budget_amount, budget_currency and budget_scope; preserve them on follow-ups.

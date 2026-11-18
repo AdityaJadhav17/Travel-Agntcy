@@ -16,6 +16,8 @@ from .models import TravelSearchArgs
 from .presentation_selection import select_for_presentation
 from .recommendations import clean_text, quote_facts
 
+PARTIAL_RETURN_NOTICE = "Some returns could not be checked. Showing verified fares."
+
 
 class ReturnFlightCard(BaseModel):
     airline: str = Field(max_length=160)
@@ -260,6 +262,7 @@ def travel_result(kind, trip: TravelSearchArgs, *, flights=(), hotels=(), activi
             and hotel_cards[0].total_usd is not None):
         total = float(money(flight_cards[0].total_usd + hotel_cards[0].total_usd))
     notices = [clean_text(item) for item in (
+        PARTIAL_RETURN_NOTICE if any(quote.get("return_lookup_incomplete") for quote in flight_pool) else "",
         notice,
         "Separate quotes; no compatible pairing was confirmed." if kind == "full_trip" and not combine_quotes else "",
         flight_notice, hotel_notice, activity_notice,
@@ -328,10 +331,14 @@ def date_comparison_result(trip: TravelSearchArgs, quoted):
     notice = ("Airfare only for the requested travelers. Round-trip options shift departure "
               "and return together, keeping the same trip length. Hotel, activities, "
               "baggage and transfers are not repriced. Confirm fares before booking.")
+    if trip.flight_timing and (window := trip.flight_timing.window_summary()):
+        notice = f"Local time · {window}. " + notice
+    if any(quote.get("return_lookup_incomplete") for _, _, quote, _ in quoted):
+        notice = PARTIAL_RETURN_NOTICE + " " + notice
     return TravelResult(
         kind="date_comparison", searched_at=datetime.now(timezone.utc),
         origin=clean_text(trip.origin), destination=clean_text(trip.destination_city or trip.destination),
         start_date=trip.start_date or "", end_date=trip.end_date or "",
         adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
-        base_fare_usd=baseline, date_alternatives=alternatives, notice=notice,
+        base_fare_usd=baseline, date_alternatives=alternatives, notice=notice[:240],
     ).model_dump(mode="json")
