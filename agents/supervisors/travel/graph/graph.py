@@ -35,6 +35,9 @@ from ioa_observe.sdk.decorators import agent, graph
 # Import A2A tools for communicating with Flight, Hotel, and Activity agents
 from agents.supervisors.travel.graph.tools import get_flights_via_a2a, get_hotels_via_a2a, get_activities_via_a2a
 from agents.travel.travel_logic import find_cheapest_plan
+from agents.travel.flight_timing import (
+    FlightTiming, TIME_CLARIFICATION, departure_period, simple_timing_edit,
+)
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.budgets import budget_question, quote_total, filter_quotes, assessment
 from agents.supervisors.travel.graph.recommendations import Recommendation, capture_recommendation, capture_flight_recommendation, explain_recommendation, quote_facts
@@ -91,6 +94,7 @@ class GraphState(MessagesState):
     full_response: str = ""
     search_params: dict = {}
     combined_search_params: TravelSearchArgs | None
+    timing_edit: bool
     budget_assessment: dict | None = None
     recommendation: dict | None = None
     travel_result: dict | None = None
@@ -218,6 +222,23 @@ class TravelGraph:
             Updated state with next_node routing decision
         """
         latest = next((m.content for m in reversed(state["messages"]) if m.type == "human"), "")
+        saved = state.get("search_params") or {}
+        if isinstance(latest, str) and saved.get("search_type") in ("flight_only", "full_trip"):
+            try:
+                trip = TravelSearchArgs.model_validate(saved)
+            except ValidationError:
+                pass
+            else:
+                if (edit := simple_timing_edit(latest, trip.flight_timing or FlightTiming())) is not None:
+                    if isinstance(edit, str):
+                        trip.clarification_question = edit
+                    else:
+                        trip.flight_timing = edit
+                        if trip.clarification_question.startswith(TIME_CLARIFICATION):
+                            trip.clarification_question = ""
+                    emit("status", component="request", message="Updating flight times")
+                    return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None,
+                            "partial_search": None, "combined_search_params": trip, "timing_edit": True}
         if isinstance(latest, str) and self._nearby_arrival_request(latest):
             return {"next_node": NodeStates.TRAVEL_SEARCH, "recommendation": None, "partial_search": None}
         if isinstance(latest, str) and latest.strip().lower().rstrip("?.!") == "retry hotels":
@@ -303,6 +324,8 @@ Based on the user's message, respond with ONE of these options:
 
 Treat the final human message as the current request. Earlier messages are context.
 Short replies to clarification questions and corrections to a trip are travel_search.
+Requests to refine or compare flight times from the current trip are travel_search,
+even if the user gives only a time like "after 7" or asks for "something later".
 Do not classify from keywords alone.
 Conversation: {user_message}
 
@@ -425,7 +448,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     flights = await asyncio.wait_for(get_flights_via_a2a(
                         trip.origin, trip.destination, departure.isoformat(),
                         return_date.isoformat() if return_date else None,
-                        is_one_way=trip.is_one_way, party=trip,
+                        is_one_way=trip.is_one_way, party=trip, **trip.flight_search_options(),
                     ), timeout=PROVIDER_TIMEOUT_SECONDS)
                 except (Exception, asyncio.TimeoutError):
                     logger.warning("Date comparison search unavailable for %s", departure)
@@ -521,7 +544,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 current_flights = await get_flights_via_a2a(
                     params.origin, params.destination, params.start_date,
                     params.end_date if not params.is_one_way else None,
-                    is_one_way=params.is_one_way, party=params,
+                    is_one_way=params.is_one_way, party=params, **params.flight_search_options(),
                 )
                 # Keep precisely the chosen itinerary. Never silently replace it
                 # with a different flight when a provider no longer returns it.
@@ -732,7 +755,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 fresh = await asyncio.wait_for(get_flights_via_a2a(
                     params.origin, params.destination, params.start_date,
                     params.end_date if not params.is_one_way else None,
-                    is_one_way=params.is_one_way, party=params,
+                    is_one_way=params.is_one_way, party=params, **params.flight_search_options(),
                 ), timeout=PROVIDER_TIMEOUT_SECONDS)
             except (Exception, asyncio.TimeoutError):
                 return {**self._quoted_response("I couldn't recheck the saved flights. Please start a new trip search."),
@@ -801,6 +824,9 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 async with timed("parameter_extraction", category="model"):
                     params = await self._extract_travel_params(context)
         except ValidationError as exc:
+            if any("flight_timing" in error.get("loc", ()) for error in exc.errors()):
+                return self._quoted_response(
+                    "What local time window should I use? For example, “leave after 6:30 p.m.” or “arrive before noon.”")
             count_fields = {"flight_result_count": "flight", "hotel_result_count": "hotel",
                             "activity_result_count": "activity"}
             invalid_count = next((count_fields.get(error.get("loc", [None])[-1])
@@ -824,14 +850,25 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
         comparison_requested = self._nearby_arrival_request(str(user_msg.content))
         if comparison_requested:
             params.search_type = "flight_only"
+        saved = state.get("search_params") or {}
+        if not state.get("timing_edit"):
+            params = self._apply_explicit_scope(params, str(user_msg.content), saved)
+            if (params.flight_timing is None and saved.get("flight_timing")
+                    and (params.origin, params.destination, params.is_one_way)
+                    == (saved.get("origin"), saved.get("destination"), saved.get("is_one_way", False))):
+                params.flight_timing = FlightTiming.model_validate(saved["flight_timing"])
+        if params.flight_timing and not any(params.flight_timing.model_dump().values()):
+            params.flight_timing = None
         # Persist extracted details even when the next response is a question.
-        trip = params.model_dump()
-        params = self._apply_explicit_scope(params, str(user_msg.content), state.get("search_params") or {})
         trip = params.model_dump()
         if party_question := params.question(params.search_type):
             return {"messages": [AIMessage(content=party_question)], "search_params": trip}
         if params.clarification_question:
             return {"messages": [AIMessage(content=params.clarification_question)], "search_params": trip}
+        if (params.search_type in ("flight_only", "full_trip") and params.is_one_way
+                and params.flight_timing and params.flight_timing.has_return_timing()):
+            return {"messages": [AIMessage(content="This trip is one-way. Should I apply that timing to the outbound flight, or are you adding a return?")],
+                    "search_params": trip}
         budget_clarification = budget_question(params)
         if budget_clarification:
             return {"messages": [AIMessage(content=budget_clarification)], "search_params": trip}
@@ -847,8 +884,13 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             "flight_only": self._handle_flight_only_search,
             "full_trip": self._handle_full_trip_search,
         }
-        result = await (self._handle_nearby_airport_search(params) if comparison_requested
-                        else handlers[params.search_type](params))
+        if (state.get("timing_edit") and params.search_type == "full_trip"
+                and params.flight_timing and params.flight_timing.compare_departures):
+            flight_params = params.model_copy(update={"search_type": "flight_only", "budget_amount": None})
+            result = await self._handle_flight_only_search(flight_params, comparison_for_trip=True)
+        else:
+            result = await (self._handle_nearby_airport_search(params) if comparison_requested
+                            else handlers[params.search_type](params))
         if params.search_type != "activity_only":
             # Keep the budget prefix intact for the UI's structured assessment.
             label = params.label(params.search_type)
@@ -1073,7 +1115,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             emit("error", component="hotels", message="Hotel provider unavailable")
             return self._quoted_response("The hotel provider is unavailable. Please try again later.")
 
-    async def _handle_flight_only_search(self, params: TravelSearchArgs) -> dict:
+    async def _handle_flight_only_search(self, params: TravelSearchArgs, *, comparison_for_trip=False) -> dict:
         """
         Handle flight-only search requests (one-way or round-trip).
         
@@ -1110,12 +1152,15 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 is_one_way=params.is_one_way,
                 party=params,
                 allow_preview=True,
+                **params.flight_search_options(),
                 **({"allow_verified_preview": True}
                    if params.budget_amount is None
                    and os.getenv("TRAVEL_VERIFIED_FLIGHT_PREVIEW_ENABLED", "false").lower() == "true"
                    else {}),
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
+            if not flights and params.flight_timing:
+                return self._flight_timing_no_matches(params)
             summary = None
             if params.budget_amount is not None:
                 flights, summary = filter_quotes(flights, "flight", params)
@@ -1124,18 +1169,55 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             if not flights:
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination} for {params.start_date}. Please try different dates.")]}
             
-            response = self._format_flights_only(flights, params)
-            emit("result", component="flights", travel_result=travel_result(
-                "flight_only", params, flights=flights))
             selected_flights, _ = select_for_presentation(flights, params.flight_result_count, limit=5)
+            notice = self._flight_timing_notice(params, selected_flights)
+            if comparison_for_trip:
+                notice = "Flight fares only. Hotel prices are separate. " + notice
+            response = self._format_flights_only(flights, params)
+            if notice:
+                response += "\n\n" + notice
+            cards = travel_result("flight_only", params, flights=flights, notice=notice)
+            emit("result", component="flights", travel_result=cards)
             return {**self._quoted_response(response, summary),
-                    "travel_result": travel_result("flight_only", params, flights=flights),
+                    "travel_result": cards,
                     "recommendation": capture_flight_recommendation(selected_flights, params)}
             
         except Exception as e:
             logger.error(f"Error searching flights: {e}")
             emit("error", component="flights", message="Flight provider unavailable")
             return self._quoted_response("The flight provider is unavailable. Please try again later.")
+
+    @staticmethod
+    def _flight_timing_no_matches(params):
+        summary = params.flight_timing.window_summary()
+        if summary:
+            return TravelGraph._quoted_response(
+                f"I found no priced flights for {summary} (local time). "
+                "Try a wider window, a different date, or say “any time” to see more options."
+            )
+        return TravelGraph._quoted_response("I found no priced flights to compare on those dates. Want to try another date?")
+
+    @staticmethod
+    def _flight_timing_notice(params, shown):
+        timing = params.flight_timing
+        if not timing:
+            return ""
+        window = timing.window_summary()
+        notes = [f"Local time · {window}."] if window else []
+        if timing.compare_departures:
+            leg = timing.compare_departures
+            periods = {
+                departure_period(quote if leg == "outbound" else quote.get("return_flight") or {})
+                for quote in shown
+            } - {None}
+            missing = set(timing.comparison_periods) - periods
+            if missing and params.flight_result_count != 1:
+                notes.append(f"No {leg} quote shown for {', '.join(sorted(missing))}.")
+            elif len(periods) == 1 and params.flight_result_count != 1:
+                notes.append(f"These quotes show {leg} departures in one period: {next(iter(periods))}.")
+            elif not periods:
+                notes.append(f"The provider did not confirm {leg} departure times for these quotes.")
+        return " ".join(notes)
 
     async def _handle_nearby_airport_search(self, params: TravelSearchArgs) -> dict:
         """Compare priced arrivals near the requested destination, not a new trip."""
@@ -1160,7 +1242,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     flights = await asyncio.wait_for(get_flights_via_a2a(
                         params.origin, arrival.airport.code, params.start_date,
                         params.end_date if not params.is_one_way else None,
-                        is_one_way=params.is_one_way, party=params,
+                        is_one_way=params.is_one_way, party=params, **params.flight_search_options(),
                     ), timeout=PROVIDER_TIMEOUT_SECONDS)
                 except (Exception, asyncio.TimeoutError):
                     logger.exception("Nearby flight search failed for %s", arrival.airport.code)
@@ -1281,9 +1363,12 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 is_one_way=params.is_one_way,
                 party=params,
                 allow_preview=True,
+                **params.flight_search_options(),
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
             if not flights:
+                if params.flight_timing:
+                    return self._flight_timing_no_matches(params)
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination}. Please try again.")]}
 
             emit("result", component="flights", travel_result=travel_result(
@@ -1415,6 +1500,26 @@ For ambiguous dates/locations, leave the uncertain field empty and put a short s
 question in clarification_question. Missing details alone are not ambiguity: leave
 clarification_question empty and let the app ask for missing fields. Clear
 clarification_question once the ambiguity has been resolved.
+For flights, extract flight_timing only from traveler preferences, never from
+example itineraries, hotel check-in times, dates, or the assistant's prior quotes.
+Use separate outbound_departure, outbound_arrival, return_departure, return_arrival
+windows in airport-local time with HH:MM start (inclusive) and end (exclusive).
+Unless the request specifies arrival or return, use outbound departure. Morning is
+06:00–12:00, afternoon 12:00–18:00, evening 18:00–24:00, early morning 00:00–06:00,
+and red-eye departure 22:00–06:00. An overnight window can wrap past midnight
+without changing the date. Example: 'leave after 6:30 p.m. and get back before noon'
+sets outbound_departure to 18:30–24:00 and return_arrival to 00:00–12:00.
+For 'show different times' or 'compare morning vs evening', set compare_departures
+to outbound (or return if specified), and clear the departure window for that leg
+if the traveler wants alternatives to it. Set comparison_periods to the named
+periods when explicitly requested; leave the list empty for open-ended comparisons.
+Preserve unrelated windows across edits,
+and return an empty flight_timing object on a clear-all request. Use null if there
+was no requested timing. For a time with ambiguous
+AM/PM or 'earlier/later' without a reference, ask one targeted question. Keep the
+route, dates, party, budget and search type for timing-only refinements.
+If a user switches from round-trip to one-way, drop the return windows and any
+return comparison unless the new request still explicitly mentions a return.
 Extract budget_amount, budget_currency and budget_scope; preserve them on follow-ups.
 When a user removes the budget, set all three budget fields to null.
 Budget currency must be explicit or established by previous USD quotes; a bare dollar

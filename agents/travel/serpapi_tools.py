@@ -22,6 +22,7 @@ from typing import Optional
 from datetime import datetime
 
 from config.config import SERPAPI_API_KEY, SERPAPI_BASE_URL
+from agents.travel.flight_timing import FlightTiming, spread_departures
 from agents.travel.party import TravelParty
 from common.travel_timing import timed
 from agents.travel.provider_http import provider_concurrency_limit, provider_http_client
@@ -132,6 +133,7 @@ async def search_flights(
     *,
     on_outbound_preview: OutboundPreviewCallback | None = None,
     on_verified_preview: VerifiedPreviewCallback | None = None,
+    flight_timing: FlightTiming | None = None,
 ) -> list[dict]:
     """
     Search for flights using SerpAPI's Google Flights engine.
@@ -209,6 +211,8 @@ async def search_flights(
     # Only include return_date for round-trip searches
     if not is_one_way and return_date:
         params["return_date"] = return_date
+    if flight_timing:
+        params.update(flight_timing.provider_filters())
     
     try:
         # Make async HTTP request to SerpAPI for outbound flights
@@ -228,7 +232,7 @@ async def search_flights(
         
         for flight_group in best_flights + other_flights:
             flight_info = _parse_flight(flight_group)
-            if flight_info:
+            if flight_info and (not flight_timing or flight_timing.matches_leg(flight_info, "outbound")):
                 flight_info["party"] = party.model_dump()
                 flight_info["price_scope"] = "requested_party"
                 all_flights.append(flight_info)
@@ -238,7 +242,12 @@ async def search_flights(
         # Retrieve return legs for the actual selected outbound itinerary.
         # An unrelated one-way search cannot establish a round-trip fare.
         if not is_one_way:
-            candidates = sorted(all_flights, key=lambda item: item["price"])[:3]
+            candidates = sorted(all_flights, key=lambda item: item["price"])
+            if flight_timing:
+                candidates = [flight for flight in candidates if flight.get("departure_token")]
+                if flight_timing.compare_departures == "outbound":
+                    candidates = spread_departures(candidates)
+            candidates = candidates[:3]
             candidates_with_tokens = [(flight, flight.get("departure_token")) for flight in candidates]
             candidates_with_tokens = [(flight, token) for flight, token in candidates_with_tokens if token]
             if on_outbound_preview is not None and candidates_with_tokens:
@@ -260,7 +269,7 @@ async def search_flights(
                 data = await _request_provider({**params, "departure_token": token})
                 if on_verified_preview is not None and not verified_published:
                     try:
-                        selected = _lowest_return_quote(data)
+                        selected = _lowest_return_quote(data, flight_timing)
                         if selected and (card := _verified_preview(flight, selected, params)):
                             on_verified_preview(card)
                             verified_published = True
@@ -279,11 +288,28 @@ async def search_flights(
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
-            for (flight, _), return_data in zip(candidates_with_tokens, return_options):
-                if selected := _lowest_return_quote(return_data):
-                    flight["return_flight"] = selected
-                    flight["price"] = selected["price"]
+            if flight_timing:
+                # Reuse priced returns from the existing lookups. An unchecked
+                # outbound alone cannot satisfy a return request.
+                all_flights = [
+                    {**flight, "return_flight": quote, "price": quote["price"]}
+                    for (flight, _), data in zip(candidates_with_tokens, return_options)
+                    for quote in (
+                        _return_quotes(data, flight_timing) if flight_timing.compare_departures == "return"
+                        else [_lowest_return_quote(data, flight_timing)]
+                    )
+                    if quote
+                ]
+            else:
+                for (flight, _), data in zip(candidates_with_tokens, return_options):
+                    if selected := _lowest_return_quote(data, flight_timing):
+                        flight["return_flight"] = selected
+                        flight["price"] = selected["price"]
 
+        if flight_timing and flight_timing.compare_departures:
+            all_flights = spread_departures(
+                sorted(all_flights, key=lambda quote: quote["price"]), leg=flight_timing.compare_departures,
+            )
         return all_flights
         
     except httpx.HTTPError as e:
@@ -304,9 +330,17 @@ def _preview_leg(flight: dict) -> dict:
     }
 
 
-def _lowest_return_quote(data: dict) -> dict | None:
+def _return_quotes(data: dict, timing: FlightTiming | None) -> list[dict]:
     options = data.get("best_flights", []) + data.get("other_flights", [])
-    priced = [quote for option in options if (quote := _parse_return_flight(option)) and quote.get("price", 0) > 0]
+    return [
+        quote for option in options
+        if (quote := _parse_return_flight(option)) and quote.get("price", 0) > 0
+        and (not timing or timing.matches_leg(quote, "return"))
+    ]
+
+
+def _lowest_return_quote(data: dict, timing: FlightTiming | None = None) -> dict | None:
+    priced = _return_quotes(data, timing)
     return min(priced, key=lambda quote: quote["price"]) if priced else None
 
 

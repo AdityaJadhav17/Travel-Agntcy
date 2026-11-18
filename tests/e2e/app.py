@@ -57,6 +57,10 @@ async def extract(context):
         params["destination_city"] = "Slow-" + marker[1]
     if "dallas" in prompt:
         params["origin"] = "DFW"
+    if "seattle to chicago" in prompt:
+        params.update(origin="SEA", is_one_way="one-way" in prompt, search_type="flight_only")
+        if "evening flights" in prompt:
+            params["flight_timing"] = {"outbound_departure": {"start": "18:00", "end": "24:00"}}
     dates = re.findall(r"\d{4}-\d{2}-\d{2}", prompt)
     if dates:
         params["start_date"] = dates[0]

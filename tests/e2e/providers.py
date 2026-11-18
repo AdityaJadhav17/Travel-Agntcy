@@ -67,6 +67,15 @@ def search(request: Request):
                 "MRY": 450, "FAT": 470, "BUR": 350, "LAX": 300}.get(params["arrival_id"], 240)
         option = {"price": fare * adults + children * 150, "departure_token": "fixture-outbound",
                   "total_duration": 180, "flights": [flight]}
+        if origin == "SEA" and destination == "ORD" and params["type"] == "2":
+            return {"other_flights": [
+                {**option, "price": price, "flights": [{
+                    **flight,
+                    "departure_airport": {"id": origin, "time": f"{day} {departure}"},
+                    "arrival_airport": {"id": destination, "time": f"{day} {arrival}"},
+                }]}
+                for departure, arrival, price in (("08:00", "13:00", 150), ("15:00", "20:00", 180), ("19:00", "23:55", 210))
+            ]}
         if params["arrival_id"] == "ORD":
             if not inbound:
                 later = {**flight, "departure_airport": {**flight["departure_airport"], "time": f"{day} 14:00"},
