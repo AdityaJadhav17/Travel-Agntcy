@@ -80,7 +80,17 @@ async def _request_search(params: dict) -> dict:
     """Never include an authenticated request URL in errors or logs."""
     try:
         async with provider_http_client() as client:
-            response = await client.get(SERPAPI_BASE_URL, params=params)
+            if params.get("departure_token"):
+                request = client.build_request("GET", SERPAPI_BASE_URL, params=params)
+                async with timed("return_lookup_headers", category="provider_http"):
+                    response = await client.send(request, stream=True)
+                try:
+                    async with timed("return_lookup_body", category="provider_http"):
+                        await response.aread()
+                finally:
+                    await response.aclose()
+            else:
+                response = await client.get(SERPAPI_BASE_URL, params=params)
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPStatusError as exc:
