@@ -394,3 +394,11 @@ fare coverage or guarantee the least expensive dates outside the checked window.
 4. Verify the flight agent and result cards with provider fixtures that include
    cheaper out-of-window fares, exact boundaries, missing return matches,
    comparisons, and follow-ups that preserve the route, dates, and party.
+
+Date comparisons apply a new clock window across the same date range. A short
+AM/PM reply resolves the saved clock question for the original leg and action.
+For a later-return request with a fixed outbound, recheck the saved itinerary
+against the current provider response and price only returns paired with it.
+Try an explicitly accepted departure fallback when the preferred fares do
+not meet the search constraints. If a return lookup fails, keep verified fares
+and show that fewer returns were checked.
