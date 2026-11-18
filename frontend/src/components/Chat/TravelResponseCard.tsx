@@ -1196,7 +1196,10 @@ const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
       {structured ? (
         <>
           <StructuredTravelResultCard result={structured} />
-          <details open className="mt-4 rounded-xl border border-gray-700 p-4">
+          <details
+            open={structured.kind !== "flight_only"}
+            className="mt-4 rounded-xl border border-gray-700 px-4 py-2"
+          >
             <summary className="cursor-pointer font-medium text-gray-200">
               Travel notes
             </summary>

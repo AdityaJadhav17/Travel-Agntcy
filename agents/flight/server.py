@@ -22,9 +22,11 @@ from agntcy_app_sdk.factory import AgntcyFactory
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.server.request_handlers import DefaultRequestHandler
+from starlette.routing import Route
 
 from agents.flight.agent_executor import FlightAgentExecutor
 from agents.flight.card import AGENT_CARD
+from agents.flight.preview import PREVIEW_PATH, flight_preview_enabled, flight_preview_endpoint
 from config.config import (
     DEFAULT_MESSAGE_TRANSPORT,
     TRANSPORT_SERVER_ENDPOINT,
@@ -38,12 +40,17 @@ load_dotenv()
 factory = AgntcyFactory("lungo.flight_agent", enable_tracing=TRACING_ENABLED)
 
 
-async def run_http_server(server):
+async def run_http_server(server, executor: FlightAgentExecutor):
     """Run the HTTP/REST server."""
     try:
         port = int(os.getenv("FLIGHT_AGENT_PORT", "9001"))
         host = os.getenv("FLIGHT_AGENT_HOST", "127.0.0.1")
-        config = Config(app=server.build(), host=host, port=port, loop="asyncio")
+        app = server.build()
+        if flight_preview_enabled():
+            app.routes.append(Route(
+                PREVIEW_PATH, flight_preview_endpoint(executor.agent), methods=["POST"]
+            ))
+        config = Config(app=app, host=host, port=port, loop="asyncio")
         userver = Server(config)
         await userver.serve()
     except Exception:
@@ -85,8 +92,9 @@ async def run_transport(server, transport_type, endpoint):
 
 async def main(enable_http: bool):
     """Run the A2A server with both HTTP and transport logic."""
+    executor = FlightAgentExecutor()
     request_handler = DefaultRequestHandler(
-        agent_executor=FlightAgentExecutor(),
+        agent_executor=executor,
         task_store=InMemoryTaskStore(),
     )
 
@@ -96,7 +104,7 @@ async def main(enable_http: bool):
     )
 
     await run_service(
-        (lambda: run_http_server(server)) if enable_http else None,
+        (lambda: run_http_server(server, executor)) if enable_http else None,
         lambda: run_transport(server, DEFAULT_MESSAGE_TRANSPORT, TRANSPORT_SERVER_ENDPOINT),
     )
 

@@ -1,5 +1,7 @@
 # Travel app latency improvement plan
 
+The next measured work sequence is in [Travel responsiveness plan](responsiveness-plan.md).
+
 Status: implementation started on 2026-11-12 after adding local-owner security.
 Initial stage timing and bounded return-flight concurrency are implemented.
 Connection pooling is also implemented and validated (see Phase 3 execution
@@ -26,7 +28,7 @@ the initial optimization work so model changes do not confound comparisons.
 | Last live flight/hotel stream | Hotel result timestamp was about 2.9 seconds after flight result timestamp | One interval from one request; excludes earlier model and flight work |
 | Live request to first useful result / completion | Not measured | No defensible live median, p95, or percentage improvement yet |
 
-Code evidence:
+Code evidence at original planning time (later execution records supersede it):
 
 - `graph.py` normally makes an intent classification call before parameter
   extraction. Known follow-ups already have deterministic routes.

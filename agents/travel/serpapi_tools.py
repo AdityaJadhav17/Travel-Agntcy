@@ -16,6 +16,7 @@ import logging
 import asyncio
 import weakref
 import httpx
+from collections.abc import Callable
 from typing import Optional
 from datetime import datetime
 
@@ -25,6 +26,8 @@ from common.travel_timing import timed
 from agents.travel.provider_http import provider_concurrency_limit, provider_http_client
 
 logger = logging.getLogger("lungo.travel.serpapi_tools")
+
+OutboundPreviewCallback = Callable[[list[dict]], None]
 
 # Semaphores are scoped to event loops: provider tools may be called from
 # standalone asyncio.run() invocations as well as the long-lived service loop.
@@ -114,6 +117,8 @@ async def search_flights(
     return_date: str = None,
     include_return_flights: bool = True,
     party: TravelParty | None = None,
+    *,
+    on_outbound_preview: OutboundPreviewCallback | None = None,
 ) -> list[dict]:
     """
     Search for flights using SerpAPI's Google Flights engine.
@@ -132,6 +137,8 @@ async def search_flights(
         return_date: Return date in YYYY-MM-DD format (optional for one-way)
         include_return_flights: If True, fetch return flight options for round-trip (default: True)
                                Set to False for one-way flights.
+        on_outbound_preview: Optional callback for the first return-lookup candidates, called
+                             before their fares are resolved.
     
     Returns:
         List of flight dictionaries containing:
@@ -221,6 +228,22 @@ async def search_flights(
             candidates = sorted(all_flights, key=lambda item: item["price"])[:3]
             candidates_with_tokens = [(flight, flight.get("departure_token")) for flight in candidates]
             candidates_with_tokens = [(flight, token) for flight, token in candidates_with_tokens if token]
+            if on_outbound_preview is not None and candidates_with_tokens:
+                try:
+                    preview = [
+                        {
+                            "airline": _preview_text(flight["airline"], 200),
+                            "departure_time": _preview_text(flight["departure_time"], 64),
+                            "arrival_time": _preview_text(flight["arrival_time"], 64),
+                            "stops": flight["stops"],
+                        }
+                        for flight, _ in candidates_with_tokens
+                        if 0 <= flight["stops"] <= 20
+                    ]
+                    if preview:
+                        on_outbound_preview(preview)
+                except Exception:
+                    logger.warning("Could not publish outbound flight preview")
 
             async def lookup(token):
                 return await _request_provider({**params, "departure_token": token})
@@ -249,6 +272,10 @@ async def search_flights(
     except httpx.HTTPError as e:
         logger.error(f"HTTP error searching flights: {e}")
         raise Exception(f"Failed to search flights: {e}")
+
+
+def _preview_text(value: object, limit: int) -> str:
+    return value[:limit] if isinstance(value, str) else ""
 
 
 async def _search_return_flights(

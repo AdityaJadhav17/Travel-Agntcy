@@ -8,6 +8,8 @@ x-python: &python
 x-env: &environment
   TRACING_ENABLED: "false"
   IDENTITY_AUTH_ENABLED: "false"
+  TRAVEL_FLIGHT_PREVIEW_ENABLED: ${TRAVEL_FLIGHT_PREVIEW_ENABLED:-false}
+  TRAVEL_COMBINED_DECISION_ENABLED: ${TRAVEL_COMBINED_DECISION_ENABLED:-false}
   TRAVEL_SECURITY_ENABLED: "false"
   DEFAULT_MESSAGE_TRANSPORT: NATS
   TRANSPORT_SERVER_ENDPOINT: nats://nats:4222
@@ -50,7 +52,9 @@ services:
       retries: 30
   flight-agent:
     <<: *python
-    environment: *environment
+    environment:
+      <<: *environment
+      FLIGHT_AGENT_HOST: "0.0.0.0"
     command: ["uv", "run", "--no-sync", "python", "-m", "agents.flight.server"]
     networks: [test]
     depends_on:

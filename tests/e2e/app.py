@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 from fastapi import APIRouter
 
+from agents.supervisors.travel.graph.graph import CombinedTravelDecision
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.main import app, travel_graph
 
@@ -19,21 +20,25 @@ __all__ = ["app"]
 
 eval_router = APIRouter()
 extraction_calls = 0
+combined_calls = 0
+intent_calls = 0
 
 
 @eval_router.get("/__eval/metrics")
 def eval_metrics():
-    return {"extraction_calls": extraction_calls}
+    return {"extraction_calls": extraction_calls, "combined_calls": combined_calls,
+            "intent_calls": intent_calls}
 
 
 app.include_router(eval_router)
 
-travel_graph.supervisor_llm = RunnableLambda(lambda _: AIMessage(content="travel_search"))
+def classify(_):
+    global intent_calls
+    intent_calls += 1
+    return AIMessage(content="travel_search")
 
 
 async def extract(context):
-    global extraction_calls
-    extraction_calls += 1
     data = json.loads(context)
     params = dict(data["saved_trip"])
     prompt = data["latest_user_message"].lower()
@@ -83,4 +88,31 @@ async def extract(context):
     return TravelSearchArgs(**params)
 
 
-travel_graph._extract_travel_params = extract
+async def extract_only(context):
+    global extraction_calls
+    extraction_calls += 1
+    return await extract(context)
+
+
+async def classify_and_extract(context):
+    global combined_calls
+    combined_calls += 1
+    return CombinedTravelDecision(intent="travel_search", params=await extract(context))
+
+
+normalize_airport_codes = travel_graph._normalize_airport_codes
+
+
+def normalize_fixture_airports(params):
+    # The provider fixture uses a synthetic hotel city to schedule a failure or delay.
+    hotel_marker = params.destination_city or ""
+    params = normalize_airport_codes(params)
+    if hotel_marker.startswith(("Transient-", "Slow-")):
+        params.destination_city = hotel_marker
+    return params
+
+
+travel_graph.supervisor_llm = RunnableLambda(classify)
+travel_graph._extract_travel_params = extract_only
+travel_graph._classify_and_extract = classify_and_extract
+travel_graph._normalize_airport_codes = normalize_fixture_airports

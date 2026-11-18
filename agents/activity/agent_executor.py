@@ -28,6 +28,7 @@ from a2a.utils.errors import ServerError
 
 from agents.activity.agent import ActivitySearchAgent
 from agents.activity.card import AGENT_CARD
+from common.travel_timing import reset_request_id, set_request_id, valid_request_id
 
 logger = logging.getLogger("lungo.activity.agent_executor")
 
@@ -42,7 +43,7 @@ class ActivityAgentExecutor(AgentExecutor):
     def _validate_request(self, context: RequestContext) -> JSONRPCResponse | None:
         """Validates the incoming request."""
         if not context or not context.message or not context.message.parts:
-            logger.error("Invalid request parameters: %s", context)
+            logger.error("Invalid request parameters")
             return JSONRPCResponse(error=ContentTypeNotSupportedError())
         return None
     
@@ -51,10 +52,24 @@ class ActivityAgentExecutor(AgentExecutor):
         context: RequestContext,
         event_queue: EventQueue,
     ) -> None:
+        """Execute a request with a validated, task-local timing correlation id."""
+        metadata = getattr(getattr(context, "message", None), "metadata", None)
+        incoming_id = metadata.get("travel_timing_id") if isinstance(metadata, dict) else None
+        token = set_request_id(incoming_id if valid_request_id(incoming_id) else None)
+        try:
+            await self._execute_request(context, event_queue)
+        finally:
+            reset_request_id(token)
+
+    async def _execute_request(
+        self,
+        context: RequestContext,
+        event_queue: EventQueue,
+    ) -> None:
         """
         Execute the activity search for a given request context.
         """
-        logger.debug("Received activity search request: %s", context.message)
+        logger.debug("Received activity search request")
 
         validation_error = self._validate_request(context)
         if validation_error:

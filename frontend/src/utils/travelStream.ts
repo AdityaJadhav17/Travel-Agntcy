@@ -11,9 +11,17 @@ export interface ApiResponse {
   retry_hotels?: boolean
 }
 
+export interface OutboundPreviewFlight {
+  airline: string
+  departure_time: string
+  arrival_time: string
+  stops: number
+}
+
 export type TravelStreamEvent =
   | { type: "status"; component: string; message: string }
   | { type: "result"; component: string; travel_result: TravelResult }
+  | { type: "outbound_preview"; flights: OutboundPreviewFlight[] }
   | { type: "error"; component: string; message: string }
   | { type: "text"; text: string }
 
@@ -34,6 +42,37 @@ export class TravelStreamError extends Error {
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
+
+function previewText(value: unknown, limit: number): string | null {
+  if (typeof value !== "string" || value.length > limit) return null
+  const text = value.trim()
+  return text && !/[\p{Cc}\p{Cf}]/u.test(text) ? text : null
+}
+
+function outboundPreview(value: unknown): OutboundPreviewFlight[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 3)
+    return null
+  const flights: OutboundPreviewFlight[] = []
+  for (const item of value) {
+    if (!record(item)) return null
+    const airline = previewText(item.airline, 200)
+    const departure_time = previewText(item.departure_time, 64)
+    const arrival_time = previewText(item.arrival_time, 64)
+    const stops = item.stops
+    if (
+      !airline ||
+      !departure_time ||
+      !arrival_time ||
+      typeof stops !== "number" ||
+      !Number.isSafeInteger(stops) ||
+      stops < 0 ||
+      stops > 20
+    )
+      return null
+    flights.push({ airline, departure_time, arrival_time, stops })
+  }
+  return flights
+}
 
 function budget(value: unknown): BudgetAssessment | null {
   if (
@@ -159,6 +198,11 @@ export class TravelStream {
               component: event.component,
               travel_result: partial,
             })
+          break
+        }
+        case "outbound_preview": {
+          const flights = outboundPreview(event.flights)
+          if (flights) onEvent({ type: "outbound_preview", flights })
           break
         }
       }
