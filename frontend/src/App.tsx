@@ -8,6 +8,7 @@ import React, {
   useEffect,
   useRef,
   useCallback,
+  useMemo,
   useReducer,
   useLayoutEffect,
 } from "react"
@@ -26,7 +27,10 @@ import TravelResponseCard from "@/components/Chat/TravelResponseCard"
 import StructuredTravelResultCard from "@/components/Chat/StructuredTravelResultCard"
 import OutboundPreviewCard from "@/components/Chat/OutboundPreviewCard"
 import FlightOptionCard from "@/components/Chat/FlightOptionCard"
+import TripSummary from "@/components/Chat/TripSummary"
+import TravelFollowUpActions from "@/components/Chat/TravelFollowUpActions"
 import { parseTravelResult } from "@/types/travelResult"
+import { latestTripContext, parseTripContext } from "@/types/tripContext"
 import { Plane } from "lucide-react"
 import { ChatRequests } from "@/stores/chatRequests"
 import type { ChatRequestToken } from "@/stores/chatRequests"
@@ -113,6 +117,10 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
     ? (display.views.get(currentChatId) ?? idleView)
     : idleView
   const conversationMessages = currentChat?.messages ?? emptyMessages
+  const tripContext = useMemo(
+    () => latestTripContext(conversationMessages),
+    [conversationMessages],
+  )
   const isAgentLoading = view.phase === "pending"
   const buttonClicked = view.phase === "pending" && view.animate
   const aiReplied = view.phase === "succeeded" || view.phase === "failed"
@@ -413,6 +421,9 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
         content: response.response,
         budget_assessment: response.budget_assessment,
         travel_result: response.travel_result,
+        ...(response.trip_state !== undefined
+          ? { trip_state: parseTripContext(response.trip_state) }
+          : {}),
         retry_hotels: response.retry_hotels,
       },
     })
@@ -559,7 +570,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
               {conversationMessages.length > 0 && (
                 <div className="mx-auto w-full max-w-[768px] px-4 py-6">
                   {conversationMessages.map((msg, index) => (
-                    <div key={index} className="mb-6">
+                    <div key={`${currentChatId}-${index}`} className="mb-6">
                       {msg.role === "user" ? (
                         /* User Message - right aligned bubble */
                         <div className="flex justify-end">
@@ -585,57 +596,17 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                               budget={msg.budget_assessment}
                               travelResult={msg.travel_result}
                             />
-                            {msg.retry_hotels &&
-                              index === conversationMessages.length - 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleUserInput("Retry hotels")
+                            {index === conversationMessages.length - 1 &&
+                              view.phase !== "deleting" && (
+                                <TravelFollowUpActions
+                                  kind={
+                                    parseTravelResult(msg.travel_result)?.kind
                                   }
-                                  className="mt-3 rounded-lg border border-emerald-400 px-3 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-400/10"
-                                >
-                                  Retry hotels
-                                </button>
-                              )}
-                            {(msg.travel_result?.kind === "flight_only" ||
-                              msg.travel_result?.kind === "full_trip") &&
-                              index === conversationMessages.length - 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleUserInput(
-                                      "Compare nearby arrival airports",
-                                    )
+                                  retryHotels={msg.retry_hotels}
+                                  onAction={(prompt) =>
+                                    void handleUserInput(prompt)
                                   }
-                                  className="mt-3 ml-2 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
-                                >
-                                  Compare nearby arrival airports
-                                </button>
-                              )}
-                            {(msg.travel_result?.kind === "flight_only" ||
-                              msg.travel_result?.kind === "full_trip") &&
-                              index === conversationMessages.length - 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleUserInput("Compare cheaper dates")
-                                  }
-                                  className="mt-3 ml-2 rounded-lg border border-blue-400 px-3 py-2 text-sm font-medium text-blue-200 hover:bg-blue-400/10"
-                                >
-                                  Compare cheaper dates
-                                </button>
-                              )}
-                            {msg.travel_result?.kind === "flight_only" &&
-                              index === conversationMessages.length - 1 && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    handleUserInput("Why this flight?")
-                                  }
-                                  className="mt-3 ml-2 rounded-lg border border-emerald-400 px-3 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-400/10"
-                                >
-                                  Why this flight?
-                                </button>
+                                />
                               )}
                           </div>
                         </div>
@@ -756,6 +727,17 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
 
             {/* Input area - fixed at bottom */}
             <div className="flex w-full flex-none flex-col items-center justify-end gap-0 bg-[#212121] px-4 pt-2 pb-6">
+              {tripContext && (
+                <TripSummary
+                  key={`${currentChatId}-${conversationMessages.length}-${view.phase}`}
+                  trip={tripContext}
+                  disabled={isAgentLoading || view.phase === "deleting"}
+                  onSearch={(prompt) => {
+                    if (activeChatRef.current === currentChatId)
+                      void handleUserInput(prompt)
+                  }}
+                />
+              )}
               <ChatArea
                 setMessages={setMessages}
                 setButtonClicked={setButtonClicked}

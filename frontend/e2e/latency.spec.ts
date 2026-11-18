@@ -546,6 +546,99 @@ test("first checked fare renders before ranking and stays out of saved history",
   )
 })
 
+test("flight sort and nonstop filter act locally and keep search actions separate", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  const outbound = flightResult.flights[0]
+  const nonstopReturn = {
+    airline: "Return Air",
+    departure_time: "18:00",
+    arrival_time: "21:00",
+    stops: 0,
+  }
+  const result = {
+    ...flightResult,
+    flights: [
+      {
+        ...outbound,
+        airline: "Both Ways Air",
+        total_usd: 350,
+        return_flight: nonstopReturn,
+      },
+      {
+        ...outbound,
+        id: "connection",
+        airline: "Outbound Nonstop Air",
+        total_usd: 200,
+        return_flight: { ...nonstopReturn, stops: 1 },
+      },
+      {
+        ...outbound,
+        id: "unavailable",
+        airline: "Unpriced Air",
+        total_usd: null,
+        return_flight: null,
+      },
+    ],
+  }
+  await emit(page, {
+    type: "result",
+    component: "flights",
+    travel_result: result,
+  })
+  await expect(
+    page.getByRole("region", { name: "Travel results" }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("group", { name: "Compare returned flights" }),
+  ).toHaveCount(0)
+  await emit(page, {
+    type: "done",
+    result: { response: "Ranked flights.", travel_result: result },
+  })
+  const choices = page
+    .getByRole("region", { name: "Travel results" })
+    .locator("article")
+  await expect(choices.first()).toContainText("Both Ways Air")
+  await page.getByLabel("Sort by").selectOption("fare")
+  await expect(choices.first()).toContainText("Outbound Nonstop Air")
+  await expect(choices.last()).toContainText("Unpriced Air")
+  const nonstop = page.getByLabel("Nonstop both ways")
+  await nonstop.check()
+  await expect(choices).toHaveCount(1)
+  await expect(choices.first()).toContainText("Both Ways Air")
+  await nonstop.uncheck()
+  await expect(choices).toHaveCount(3)
+  const searches = page.getByRole("group", { name: "Run another search" })
+  await expect(
+    searches.getByRole("button", { name: "Compare cheaper dates" }),
+  ).toBeVisible()
+  await expect(
+    searches.getByRole("button", { name: "Why this flight?" }),
+  ).toHaveCount(0)
+  await expect(
+    page
+      .getByRole("group", { name: "Actions for this result" })
+      .getByRole("button", { name: "Why this flight?" }),
+  ).toBeVisible()
+  expect(await measurements(page)).toHaveLength(1)
+
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await submit(page, "Find another flight to Boston")
+  await emit(page, {
+    type: "done",
+    result: { response: "Other ranked flights.", travel_result: result },
+  })
+  await nonstop.check()
+  await expect(choices).toHaveCount(1)
+  await page.getByRole("button", { name: prompt, exact: true }).click()
+  await expect(nonstop).not.toBeChecked()
+  await expect(choices).toHaveCount(3)
+})
+
 test("preview stays with its pending chat, clears on Stop, and cannot reappear after reload", async ({
   page,
 }) => {

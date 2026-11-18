@@ -213,6 +213,23 @@ the search is stopped. Final ranking, recommendations, hotel compatibility
 and saved results use the completed quote set. Compare `firstUsefulCardMs`
 separately from final render time.
 
+In a controlled Chrome comparison, both paths used the outbound preview and
+the same Dallas–Chicago fixture. The slow return stayed blocked for 2.5 s
+after all three provider calls started. Each path ran twice, in off/on/on/off
+order, with fresh chats.
+
+| Browser milestone | Checked fare off | Checked fare on |
+| --- | ---: | ---: |
+| Median first checked card | 3.352 s | 0.444 s |
+| Median final render | 3.578 s | 3.557 s |
+
+The fast fare appeared before the gate opened in both flag-on runs. All four
+searches used three provider calls and finished with the same ranked fares.
+In one run the checked card replaced the outbound preview before the browser
+recorded an outbound paint opportunity. These measurements use fixture timing.
+The CI browser job also runs the flag-on flight stream check against a gated
+provider and verifies that a budgeted search waits for the filtered results.
+
 ## Release and measurement gates
 
 Each phase gets an independent diff and rollback. Keep limits, authentication,

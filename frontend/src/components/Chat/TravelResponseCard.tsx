@@ -1195,7 +1195,7 @@ const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
       )}
       {structured ? (
         <>
-          <StructuredTravelResultCard result={structured} />
+          <StructuredTravelResultCard result={structured} allowFlightControls />
           <details
             open={structured.kind !== "flight_only"}
             className="mt-4 rounded-xl border border-gray-700 px-4 py-2"
