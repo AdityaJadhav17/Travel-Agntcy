@@ -482,6 +482,70 @@ test("outbound preview renders while return is pending and yields to verified fl
   expect((await latencySummary(page))!.firstOutboundPreviewMs.count).toBe(1)
 })
 
+test("first checked fare renders before ranking and stays out of saved history", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  await emit(page, previewEvent)
+  const outbound = page.getByRole("region", {
+    name: "Provisional outbound flights",
+  })
+  await expect(outbound).toBeVisible()
+  const early = page.getByRole("region", { name: "First checked round trip" })
+  const flight = {
+    outbound: { ...previewEvent.flights[0], airline: "Early Fare Air" },
+    returned: {
+      airline: "Return Air",
+      departure_time: "18:00",
+      arrival_time: "21:00",
+      stops: 0,
+    },
+    total_usd: 275,
+  }
+  await emit(page, {
+    type: "verified_flight_preview",
+    flight: { ...flight, total_usd: -1 },
+  })
+  await expect(early).toHaveCount(0)
+  await emit(page, { type: "verified_flight_preview", flight })
+  await expect(early).toContainText("$275")
+  await expect(early).toContainText("Return · Return Air")
+  await expect(early).not.toContainText("hidden-fixture-token")
+  await expect(early.getByRole("button")).toHaveCount(0)
+  await expect(page.getByRole("status")).toHaveText("Checking more fares")
+  await expect(outbound).toHaveCount(0)
+  await waitForMeasurement(
+    page,
+    (entry) => typeof entry?.firstUsefulCardMs === "number",
+  )
+  expect((await measurements(page))![0].terminalReceivedMs).toBeUndefined()
+  expect(
+    await page.evaluate(() => localStorage.getItem("travel_chat_history")),
+  ).not.toContain("Early Fare Air")
+
+  await emit(page, {
+    type: "result",
+    component: "flights",
+    travel_result: flightResult,
+  })
+  const cards = page.getByRole("region", { name: "Travel results" })
+  await expect(cards).toContainText("$240")
+  await expect(early).toHaveCount(0)
+  await emit(page, { type: "verified_flight_preview", flight })
+  await emit(page, {
+    type: "done",
+    result: { response: "Ranked flight results.", travel_result: flightResult },
+  })
+  await expect(cards).toContainText("$240")
+  await expect(early).toHaveCount(0)
+  await waitForMeasurement(
+    page,
+    (entry) => typeof entry?.finalResponseRenderedMs === "number",
+  )
+})
+
 test("preview stays with its pending chat, clears on Stop, and cannot reappear after reload", async ({
   page,
 }) => {

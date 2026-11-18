@@ -66,18 +66,25 @@ def _record(event: dict) -> str:
 
 
 async def _flight_events(
-    agent: FlightSearchAgent, query: str, timing_id: str | None
+    agent: FlightSearchAgent, query: str, timing_id: str | None, verified_preview: bool
 ) -> AsyncGenerator[str, None]:
-    preview = asyncio.get_running_loop().create_future()
+    events: asyncio.Queue[dict | None] = asyncio.Queue()
+    published: set[str] = set()
 
-    def publish(flights: list[dict]) -> None:
-        if not preview.done():
-            preview.set_result(flights)
+    def publish(kind: str, **payload) -> None:
+        if kind not in published:
+            published.add(kind)
+            events.put_nowait({"type": kind, **payload})
 
     async def search() -> dict:
         token = set_request_id(timing_id)
         try:
-            output = await agent.ainvoke(query, on_outbound_preview=publish)
+            output = await agent.ainvoke(
+                query,
+                on_outbound_preview=lambda flights: publish("outbound_preview", flights=flights),
+                **({"on_verified_preview": lambda flight: publish("verified_flight_preview", flight=flight)}
+                   if verified_preview else {}),
+            )
             result = json.loads(output)
             if isinstance(result, dict) and result.get("status") == "success":
                 return {"type": "done", "output": output}
@@ -88,13 +95,13 @@ async def _flight_events(
         return _ERROR_EVENT
 
     provider = asyncio.create_task(search())
+    # The terminal marker follows every progress event published by the task.
+    provider.add_done_callback(lambda _: events.put_nowait(None))
     try:
-        await asyncio.wait((provider, preview), return_when=asyncio.FIRST_COMPLETED)
-        if preview.done():
-            yield _record({"type": "outbound_preview", "flights": preview.result()})
+        while (event := await events.get()) is not None:
+            yield _record(event)
         yield _record(await provider)
     finally:
-        preview.cancel()
         provider.cancel()
         await asyncio.gather(provider, return_exceptions=True)
 
@@ -120,6 +127,6 @@ def flight_preview_endpoint(agent: FlightSearchAgent):
 
         incoming_id = payload.get("timing_id")
         timing_id = incoming_id if valid_request_id(incoming_id) else None
-        return _PreviewResponse(_flight_events(agent, query, timing_id))
+        return _PreviewResponse(_flight_events(agent, query, timing_id, payload.get("verified_preview") is True))
 
     return endpoint

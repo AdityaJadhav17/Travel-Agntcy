@@ -50,9 +50,10 @@ def search(request: Request):
             time.sleep(3)
     if engine == "google_flights":
         adults, children = int(params["adults"]), int(params["children"])
-        inbound = bool(params.get("departure_token"))
+        token = params.get("departure_token")
+        inbound = bool(token)
         origin, destination = params["departure_id"], params["arrival_id"]
-        if inbound and destination == "JFK" and not preview_return_gate.wait(timeout=10):
+        if inbound and (destination == "JFK" or token == "fixture-slow") and not preview_return_gate.wait(timeout=10):
             raise HTTPException(504, "Fixture return gate was never released")
         day = params["return_date"] if inbound else params["outbound_date"]
         if inbound:
@@ -64,7 +65,18 @@ def search(request: Request):
         }
         fare = {"SBP": 529, "SMX": 420, "SBA": 390, "BFL": 460,
                 "MRY": 450, "FAT": 470, "BUR": 350, "LAX": 300}.get(params["arrival_id"], 240)
-        return {"best_flights": [{"price": fare * adults + children * 150, "departure_token": "fixture-outbound", "total_duration": 180, "flights": [flight]}]}
+        option = {"price": fare * adults + children * 150, "departure_token": "fixture-outbound",
+                  "total_duration": 180, "flights": [flight]}
+        if params["arrival_id"] == "ORD":
+            if not inbound:
+                later = {**flight, "departure_airport": {**flight["departure_airport"], "time": f"{day} 14:00"},
+                         "arrival_airport": {**flight["arrival_airport"], "time": f"{day} 17:00"}}
+                return {"best_flights": [
+                    {**option, "departure_token": "fixture-slow"},
+                    {**option, "price": fare + 10, "departure_token": "fixture-fast", "flights": [later]},
+                ]}
+            option["price"] = 200 if token == "fixture-slow" else 275
+        return {"best_flights": [option]}
     if engine == "google_maps_directions":
         latitude = float(params["start_coords"].split(",")[0])
         miles = 105 if latitude < 35 else 145

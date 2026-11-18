@@ -44,7 +44,7 @@ async def extract(context):
     prompt = data["latest_user_message"].lower()
     # Allow a browser to switch chats while this deterministic response is pending.
     await asyncio.sleep(0.4)
-    for city, code in (("new york", "JFK"), ("boston", "BOS"), ("tokyo", "NRT")):
+    for city, code in (("new york", "JFK"), ("boston", "BOS"), ("tokyo", "NRT"), ("chicago", "ORD")):
         if city in prompt:
             params.update(destination=code, destination_city=city.title(), location=city.title())
     if "count city" in prompt:

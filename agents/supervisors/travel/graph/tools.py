@@ -153,6 +153,7 @@ async def _search_flights_internal(
     party: TravelParty | None = None,
     *,
     allow_preview: bool = False,
+    allow_verified_preview: bool = False,
 ) -> str:
     """
     Internal function to search for flights using the Flight Search Agent via A2A.
@@ -187,7 +188,10 @@ async def _search_flights_internal(
     message += " party:" + party.model_dump_json()
     try:
         if allow_preview and not is_one_way and return_date and preview_enabled():
-            return await fetch_flight_preview(f"{FLIGHT_AGENT_CARD.url.rstrip('/')}/internal/flight-preview", message)
+            return await fetch_flight_preview(
+                f"{FLIGHT_AGENT_CARD.url.rstrip('/')}/internal/flight-preview", message,
+                **({"verified_preview": True} if allow_verified_preview else {}),
+            )
         result = await _send_a2a_message(FLIGHT_AGENT_CARD, message)
         return result
     except (A2AAgentError, FlightPreviewError) as e:
@@ -283,6 +287,7 @@ async def get_flights_via_a2a(
     party: TravelParty | None = None,
     *,
     allow_preview: bool = False,
+    allow_verified_preview: bool = False,
 ) -> list:
     """
     Get flights via A2A and parse the response.
@@ -304,6 +309,7 @@ async def get_flights_via_a2a(
     result_json = await _search_flights_internal(
         origin, destination, outbound_date, return_date, is_one_way, party=party,
         **({"allow_preview": True} if allow_preview else {}),
+        **({"allow_verified_preview": True} if allow_verified_preview else {}),
     )
     
     try:

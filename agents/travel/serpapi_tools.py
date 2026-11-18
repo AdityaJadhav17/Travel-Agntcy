@@ -14,6 +14,7 @@ Key functions:
 
 import logging
 import asyncio
+import math
 import weakref
 import httpx
 from collections.abc import Callable
@@ -28,6 +29,7 @@ from agents.travel.provider_http import provider_concurrency_limit, provider_htt
 logger = logging.getLogger("lungo.travel.serpapi_tools")
 
 OutboundPreviewCallback = Callable[[list[dict]], None]
+VerifiedPreviewCallback = Callable[[dict], None]
 
 # Semaphores are scoped to event loops: provider tools may be called from
 # standalone asyncio.run() invocations as well as the long-lived service loop.
@@ -129,6 +131,7 @@ async def search_flights(
     party: TravelParty | None = None,
     *,
     on_outbound_preview: OutboundPreviewCallback | None = None,
+    on_verified_preview: VerifiedPreviewCallback | None = None,
 ) -> list[dict]:
     """
     Search for flights using SerpAPI's Google Flights engine.
@@ -241,12 +244,7 @@ async def search_flights(
             if on_outbound_preview is not None and candidates_with_tokens:
                 try:
                     preview = [
-                        {
-                            "airline": _preview_text(flight["airline"], 200),
-                            "departure_time": _preview_text(flight["departure_time"], 64),
-                            "arrival_time": _preview_text(flight["arrival_time"], 64),
-                            "stops": flight["stops"],
-                        }
+                        _preview_leg(flight)
                         for flight, _ in candidates_with_tokens
                         if 0 <= flight["stops"] <= 20
                     ]
@@ -255,25 +253,34 @@ async def search_flights(
                 except Exception:
                     logger.warning("Could not publish outbound flight preview")
 
-            async def lookup(token):
-                return await _request_provider({**params, "departure_token": token})
+            verified_published = False
 
-            tasks = [asyncio.create_task(lookup(token)) for _, token in candidates_with_tokens]
+            async def lookup(flight, token):
+                nonlocal verified_published
+                data = await _request_provider({**params, "departure_token": token})
+                if on_verified_preview is not None and not verified_published:
+                    try:
+                        selected = _lowest_return_quote(data)
+                        if selected and (card := _verified_preview(flight, selected, params)):
+                            on_verified_preview(card)
+                            verified_published = True
+                    except Exception:
+                        logger.warning("Could not publish verified flight preview")
+                return data
+
+            tasks = [asyncio.create_task(lookup(flight, token)) for flight, token in candidates_with_tokens]
             try:
                 # gather preserves input order, so every response remains paired
                 # with the exact outbound itinerary that supplied its token.
-                return_data_items = await asyncio.gather(*tasks)
+                return_options = await asyncio.gather(*tasks)
             except BaseException:
                 for task in tasks:
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
-            for (flight, _), return_data in zip(candidates_with_tokens, return_data_items):
-                options = return_data.get("best_flights", []) + return_data.get("other_flights", [])
-                options = [parsed for option in options if (parsed := _parse_return_flight(option)) and parsed.get("price", 0) > 0]
-                if options:
-                    selected = min(options, key=lambda item: item["price"])
+            for (flight, _), return_data in zip(candidates_with_tokens, return_options):
+                if selected := _lowest_return_quote(return_data):
                     flight["return_flight"] = selected
                     flight["price"] = selected["price"]
 
@@ -286,6 +293,37 @@ async def search_flights(
 
 def _preview_text(value: object, limit: int) -> str:
     return value[:limit] if isinstance(value, str) else ""
+
+
+def _preview_leg(flight: dict) -> dict:
+    return {
+        "airline": _preview_text(flight["airline"], 200),
+        "departure_time": _preview_text(flight["departure_time"], 64),
+        "arrival_time": _preview_text(flight["arrival_time"], 64),
+        "stops": flight["stops"],
+    }
+
+
+def _lowest_return_quote(data: dict) -> dict | None:
+    options = data.get("best_flights", []) + data.get("other_flights", [])
+    priced = [quote for option in options if (quote := _parse_return_flight(option)) and quote.get("price", 0) > 0]
+    return min(priced, key=lambda quote: quote["price"]) if priced else None
+
+
+def _verified_preview(flight: dict, selected: dict, params: dict) -> dict | None:
+    fare = selected["price"]
+    if isinstance(fare, bool) or not math.isfinite(fare) or fare <= 0:
+        return None
+    if (flight["departure_code"], flight["arrival_code"]) != (params["departure_id"], params["arrival_id"]):
+        return None
+    if (selected["departure_code"], selected["arrival_code"]) != (params["arrival_id"], params["departure_id"]):
+        return None
+    outbound, returned = _preview_leg(flight), _preview_leg(selected)
+    if outbound["departure_time"][:10] != params["outbound_date"] or returned["departure_time"][:10] != params["return_date"]:
+        return None
+    if any(not (leg["airline"] and leg["arrival_time"] and 0 <= leg["stops"] <= 20) for leg in (outbound, returned)):
+        return None
+    return {"outbound": outbound, "returned": returned, "total_usd": fare}
 
 
 async def _search_return_flights(

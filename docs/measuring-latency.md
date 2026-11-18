@@ -30,7 +30,7 @@ the browser's monotonic `performance.now()` clock:
 | Field | Meaning |
 | --- | --- |
 | `firstOutboundPreviewMs` | First provisional outbound options given a browser rendering opportunity when the optional preview is enabled |
-| `firstUsefulCardMs` | First nonempty structured travel result committed and given a browser rendering opportunity |
+| `firstUsefulCardMs` | First checked round-trip preview or nonempty structured travel result committed and given a browser rendering opportunity |
 | `finalResponseRenderedMs` | Successful final response committed and given a browser rendering opportunity, including clarification text |
 | `terminalReceivedMs` | Successful terminal result consumed by the client; **not** network EOF |
 | `endedMs` | Attempt settled, whether success, error or cancellation |

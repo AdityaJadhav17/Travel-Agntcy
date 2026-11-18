@@ -1110,6 +1110,10 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 is_one_way=params.is_one_way,
                 party=params,
                 allow_preview=True,
+                **({"allow_verified_preview": True}
+                   if params.budget_amount is None
+                   and os.getenv("TRAVEL_VERIFIED_FLIGHT_PREVIEW_ENABLED", "false").lower() == "true"
+                   else {}),
             ), timeout=PROVIDER_TIMEOUT_SECONDS)
             
             summary = None
