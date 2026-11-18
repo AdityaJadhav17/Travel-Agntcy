@@ -140,6 +140,30 @@ in tool dispatch or saved preferences. A bounded live comparison requires an
 agreed request budget. Removing the measured 1.58-second classification step is
 an illustrative opportunity only: a larger combined call may take longer.
 
+Set `TRAVEL_COMBINED_DECISION_ENABLED=true` to opt in. The supervisor tries the
+combined call on first turns that mention travel and have no saved trip or
+recommendation, when the two model roles resolve to the same model. It
+falls back to separate calls on uncertainty, invalid output, error, or timeout.
+Compare the request-correlated `combined_travel_decision` duration and fallback
+logs with `intent_classification` and `parameter_extraction`. Use browser times
+to compare the outbound preview, first verified card, and final render.
+
+A single live GPT-6 Luna comparison used the same DFW–JFK round trip (February
+12–15, 2027) with the baseline first. Both paths returned five verified flight
+options for the same trip.
+
+| HTTP stream milestone | Separate calls | Combined call |
+| --- | ---: | ---: |
+| Model stages | 7.62 s | 2.91 s |
+| Outbound preview received | 10.03 s | 2.97 s |
+| First verified result received | 15.78 s | 3.06 s |
+| Terminal event received | 15.98 s | 3.26 s |
+
+The second provider lookup was also faster. Outbound plus the longest parallel
+return lookup fell from 7.52 s to 0.12 s. Cache status was unverified. The
+model-stage difference was 4.71 s for this pair. These timings exclude browser
+rendering. Keep the flag opt-in pending broader live comparisons.
+
 ## 4. Overlap flights and hotels where safe
 
 - Run independently only when required location and stay dates are explicit and
