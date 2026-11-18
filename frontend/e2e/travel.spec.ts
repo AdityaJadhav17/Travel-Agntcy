@@ -84,7 +84,9 @@ test("structured cards survive rewritten narrative and reload", async ({
     page.getByText("Narrative wording changed after search."),
   ).toBeVisible()
   await page.reload()
-  await page.getByRole("button", { name: "Plan Dallas to New York" }).click()
+  await page
+    .getByRole("button", { name: "Plan Dallas to New York", exact: true })
+    .click()
   await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
 })
 
@@ -341,7 +343,7 @@ test("nearby arrival airports compare real fares and ground distance", async ({
   await expect(cards.getByText(/lower airfare than SBP/).first()).toBeVisible()
   await page.reload()
   await page
-    .getByRole("button", { name: /Flights only from Dallas to SBP/ })
+    .getByRole("button", { name: /^Flights only from Dallas to SBP/ })
     .click()
   await expect(cards.getByText(/LAX · Los Angeles/)).toBeVisible()
 })
@@ -373,7 +375,7 @@ test("flight explanation and nearby dates remain grounded after reload", async (
   expect(why.response).toContain("USD 240.00")
   await page.reload()
   await page
-    .getByRole("button", { name: /Flights only from Dallas to New Yor/ })
+    .getByRole("button", { name: /^Flights only from Dallas to New Yor/ })
     .click()
   await expect(page.getByText("Nearby travel dates")).toBeVisible()
 })
@@ -392,7 +394,7 @@ test("hotel failure keeps flights and retries hotels after reload", async ({
   await expect(page.getByRole("button", { name: "Retry hotels" })).toBeVisible()
   await page.reload()
   await page
-    .getByRole("button", { name: /Plan Dallas to New York with transi/ })
+    .getByRole("button", { name: /^Plan Dallas to New York with transi/ })
     .click()
   const response = page.waitForResponse((reply) =>
     reply.url().endsWith("/agent/prompt/stream"),
@@ -420,9 +422,7 @@ test("Stop ignores late hotel results", async ({ page }) => {
     }),
   ).toBeVisible()
   await page.getByRole("button", { name: "Stop", exact: true }).click()
-  await expect(
-    page.getByText("Search stopped. Late results will be ignored."),
-  ).toBeVisible()
+  await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await page.waitForTimeout(3500)
   await expect(page.getByText("Fixture Central Hotel")).toHaveCount(0)
 })
@@ -463,7 +463,9 @@ test("keeps the selected flight while changing only the hotel after reload", asy
   expect(first.recommendation.hotel.name).toBe("Fixture Central Hotel")
   const flightId = first.recommendation.flight.id
   await page.reload()
-  await page.getByRole("button", { name: "Plan Dallas to New York" }).click()
+  await page
+    .getByRole("button", { name: "Plan Dallas to New York", exact: true })
+    .click()
   const swapped = await send(page, "Keep the flights, change the hotel")
   expect(swapped.recommendation.flight.id).toBe(flightId)
   expect(swapped.recommendation.hotel.name).toBe("Fixture Riverside Hotel")
@@ -637,9 +639,16 @@ test("deleting a chat clears the browser and permanently deletes its server memo
 }) => {
   await page.goto("/")
   const result = await send(page, "Plan Tokyo.")
-  await page
-    .getByRole("button", { name: "Delete chat: Plan Tokyo.", exact: true })
-    .click()
+  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "Plan Tokyo.", exact: true }).focus()
+  await page.keyboard.press("Tab")
+  const deleteChat = page.getByRole("button", {
+    name: "Delete chat: Plan Tokyo.",
+    exact: true,
+  })
+  await expect(deleteChat).toBeFocused()
+  await expect(deleteChat).toHaveCSS("opacity", "1")
+  await page.keyboard.press("Enter")
   await expect(
     page.getByRole("button", { name: "Plan Tokyo.", exact: true }),
   ).toHaveCount(0)
@@ -765,7 +774,7 @@ test("family counts survive clarification and reload and change quoted totals", 
     page.getByText(/Travelers: 2 adults, 1 child/).last(),
   ).toBeVisible()
   await page.reload()
-  await page.getByRole("button", { name: /Plan New York from Dallas/ }).click()
+  await page.getByRole("button", { name: /^Plan New York from Dallas/ }).click()
   const correction = await send(page, "Actually Boston")
   expect(correction.trip_state).toMatchObject({
     destination: "BOS",

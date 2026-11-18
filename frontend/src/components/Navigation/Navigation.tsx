@@ -15,6 +15,9 @@ interface NavigationProps {
   onLogout?: () => Promise<void>
 }
 
+const toolbarButton =
+  "flex size-11 shrink-0 items-center justify-center rounded-md text-gray-300 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-emerald-300"
+
 const Navigation: React.FC<NavigationProps> = ({
   onToggleSidebar,
   isSidebarOpen = true,
@@ -36,70 +39,65 @@ const Navigation: React.FC<NavigationProps> = ({
   }
 
   return (
-    <div className="order-0 box-border flex h-[56px] w-full flex-none grow-0 flex-col items-start self-stretch p-0">
-      <div
-        className="order-0 box-border flex h-[56px] w-full flex-none grow-0 flex-row items-center justify-between gap-2 self-stretch border-b border-emerald-400/30 px-2 py-[10px] shadow-lg sm:px-4"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, #3ce98a, #5feb9b, #7becac, #94edbb, #abedc9)",
-        }}
-      >
-        {/* Left - Sidebar toggle */}
-        <div className="flex w-[100px] items-center">
+    <>
+      <header className="flex h-14 w-full flex-none items-center justify-between gap-2 border-b border-white/10 bg-[#171717] px-2 sm:px-4">
+        <div className="flex min-w-0 items-center gap-1 sm:gap-2">
           <button
+            type="button"
             onClick={onToggleSidebar}
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 p-2 transition-all hover:bg-white/30"
+            className={toolbarButton}
+            aria-label={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
+            aria-expanded={isSidebarOpen}
             title={isSidebarOpen ? "Close sidebar" : "Open sidebar"}
           >
             {isSidebarOpen ? (
-              <PanelLeftClose className="h-4 w-4 text-gray-800" />
+              <PanelLeftClose aria-hidden="true" className="size-4" />
             ) : (
-              <PanelLeft className="h-4 w-4 text-gray-800" />
+              <PanelLeft aria-hidden="true" className="size-4" />
             )}
           </button>
-        </div>
-
-        {/* Center - Logo and Brand */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex h-9 w-9 items-center justify-center rounded-lg bg-white/30 shadow-xs">
-            <Plane className="h-5 w-5 text-gray-800" strokeWidth={2} />
-          </div>
-          <span className="text-lg font-semibold tracking-tight text-gray-800">
+          <Plane
+            aria-hidden="true"
+            className="size-4 shrink-0 text-[#3ce98a]"
+          />
+          <span className="truncate text-sm font-semibold text-white">
             Travel AGNTCY
           </span>
         </div>
 
-        {/* Right Actions */}
-        <div className="flex min-w-[100px] flex-row items-center justify-end gap-1">
+        <div className="flex shrink-0 items-center">
           {onLogout && (
             <button
               type="button"
               onClick={() => void onLogout()}
-              className="rounded-lg bg-white/20 px-2 py-1.5 text-xs font-medium text-gray-800 transition-all hover:bg-white/30 sm:px-3 sm:text-sm"
+              className="min-h-11 rounded-md px-2 text-xs font-medium text-gray-300 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-emerald-300 sm:px-3 sm:text-sm"
             >
               Sign out
             </button>
           )}
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 p-2 transition-all hover:bg-white/30"
+            type="button"
+            className={toolbarButton}
             title={`Switch to ${isLightMode ? "dark" : "light"} mode`}
             aria-label={`Switch to ${isLightMode ? "dark" : "light"} mode`}
             onClick={handleThemeToggle}
           >
-            <ThemeToggleIcon className="h-4 w-4 text-gray-800" />
+            <ThemeToggleIcon className="size-4" />
           </button>
           <button
-            className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20 p-2 transition-all hover:bg-white/30"
+            type="button"
+            className={toolbarButton}
+            aria-label="Help"
             title="Help"
             onClick={handleHelpClick}
           >
-            <HelpCircle className="h-4 w-4 text-gray-800" />
+            <HelpCircle aria-hidden="true" className="size-4" />
           </button>
         </div>
-      </div>
+      </header>
 
       <InfoModal isOpen={isModalOpen} onClose={handleCloseModal} />
-    </div>
+    </>
   )
 }
 

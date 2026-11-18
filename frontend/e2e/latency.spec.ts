@@ -249,6 +249,51 @@ test("flight cards expose the fare tradeoff and both travel days on a narrow scr
   ).toBeVisible()
 })
 
+test("new chat starters prepare an editable draft and keep the agent graph optional", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 740 })
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await expect(
+    page.getByRole("heading", { name: "Plan a trip", exact: true }),
+  ).toBeVisible()
+  const graph = page.getByRole("button", { name: "Show agent graph" })
+  await expect(graph).toHaveAttribute("aria-expanded", "false")
+  await graph.click()
+  await expect(
+    page.getByRole("button", { name: "Hide agent graph" }),
+  ).toHaveAttribute("aria-expanded", "true")
+  await page.getByRole("button", { name: "Hide agent graph" }).click()
+
+  const input = page.getByRole("textbox", { name: "Message Travel AGNTCY" })
+  const starters = page.getByRole("group", { name: "Search starters" })
+  await starters.getByRole("button", { name: "Find flights" }).click()
+  await expect(input).toHaveValue("Find flights from ")
+  await expect(input).toBeFocused()
+  await starters.getByRole("button", { name: "Find a hotel" }).click()
+  await expect(input).toHaveValue("Find a hotel in ")
+  await input.fill("Find a hotel in Boston")
+  await expect(
+    starters.getByRole("button", { name: "Find flights" }),
+  ).toBeDisabled()
+  await expect(input).toHaveValue("Find a hotel in Boston")
+  expect(await measurements(page)).toHaveLength(0)
+
+  await submit(page)
+  await expect(starters).toHaveCount(0)
+  await expect(
+    page.getByText("Confirm prices and availability before booking."),
+  ).toHaveCount(0)
+  await emit(page, {
+    type: "done",
+    result: { response: "Flights found.", travel_result: flightResult },
+  })
+  await expect(
+    page.getByText("Confirm prices and availability before booking."),
+  ).toBeVisible()
+})
+
 test("narrow search acknowledges Send immediately and keeps Stop fixed through preview", async ({
   page,
 }) => {
@@ -658,9 +703,7 @@ test("preview stays with its pending chat, clears on Stop, and cannot reappear a
   await page.getByRole("button", { name: "Stop", exact: true }).click()
   await emit(page, previewEvent, prompt)
   await expect(preview).toHaveCount(0)
-  await expect(
-    page.getByText("Search stopped. Late results will be ignored."),
-  ).toBeVisible()
+  await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await page.reload()
   await page.getByRole("button", { name: prompt, exact: true }).click()
   await expect(preview).toHaveCount(0)
@@ -802,9 +845,7 @@ test("request errors and Stop are recorded as terminal failures, never successes
   await page.getByRole("button", { name: "New chat", exact: true }).click()
   await submit(page)
   await page.getByRole("button", { name: "Stop", exact: true }).click()
-  await expect(
-    page.getByText("Search stopped. Late results will be ignored."),
-  ).toBeVisible()
+  await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await expect.poll(async () => (await measurements(page))?.length ?? 0).toBe(2)
   const entries = (await measurements(page))!
   expect(entries.map((entry) => entry.outcome)).toEqual(["error", "cancelled"])

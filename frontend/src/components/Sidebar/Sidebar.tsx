@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useState } from "react"
+import React from "react"
 import { Plus, Trash2 } from "lucide-react"
 import { PatternType } from "@/utils/patternUtils"
 import { ChatHistoryItem } from "@/App"
@@ -27,8 +27,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   currentChatId,
   isOpen = true,
 }) => {
-  const [hoveredChatId, setHoveredChatId] = useState<string | null>(null)
-
   const handleNewChat = () => {
     if (onNewChat) onNewChat()
   }
@@ -85,7 +83,10 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Chat History Section */}
-      <div className="flex-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent overflow-y-auto px-2">
+      <nav
+        aria-label="Chat history"
+        className="flex-1 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-transparent overflow-y-auto px-2"
+      >
         {chatHistory.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <p className="text-xs text-gray-500">No conversation history</p>
@@ -104,8 +105,6 @@ const Sidebar: React.FC<SidebarProps> = ({
                     {chats.map((chat) => (
                       <div
                         key={chat.id}
-                        onMouseEnter={() => setHoveredChatId(chat.id)}
-                        onMouseLeave={() => setHoveredChatId(null)}
                         className={`group relative flex w-full items-center rounded-lg px-3 py-2 text-left transition-colors ${
                           currentChatId === chat.id
                             ? "bg-[#2f2f2f]"
@@ -119,19 +118,13 @@ const Sidebar: React.FC<SidebarProps> = ({
                           {chat.title}
                         </button>
 
-                        {/* Actions on hover */}
-                        {(hoveredChatId === chat.id ||
-                          currentChatId === chat.id) && (
-                          <div className="absolute right-2 flex items-center gap-1">
-                            <button
-                              aria-label={`Delete chat: ${chat.title}`}
-                              onClick={(e) => handleDeleteChat(e, chat.id)}
-                              className="rounded p-1 text-gray-400 transition-colors hover:bg-[#404040] hover:text-red-400"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        )}
+                        <button
+                          aria-label={`Delete chat: ${chat.title}`}
+                          onClick={(e) => handleDeleteChat(e, chat.id)}
+                          className={`absolute right-2 rounded p-1 text-gray-400 hover:bg-[#404040] hover:text-red-400 focus-visible:outline-2 focus-visible:outline-emerald-300 ${currentChatId === chat.id ? "" : "group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:hover)]:opacity-0"}`}
+                        >
+                          <Trash2 aria-hidden="true" className="h-4 w-4" />
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -139,20 +132,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               ),
           )
         )}
-      </div>
-
-      {/* Footer - Status indicator */}
-      <div className="border-t border-[#2f2f2f] p-3">
-        <div className="flex items-center gap-2 rounded-lg bg-linear-to-r from-[#3ce98a]/10 to-transparent px-3 py-2.5">
-          <div className="relative">
-            <div className="h-2 w-2 rounded-full bg-[#3ce98a]" />
-            <div className="absolute inset-0 h-2 w-2 animate-ping rounded-full bg-[#3ce98a] opacity-50" />
-          </div>
-          <span className="text-xs font-medium text-[#3ce98a]">
-            Travel Agent Ready
-          </span>
-        </div>
-      </div>
+      </nav>
     </div>
   )
 }

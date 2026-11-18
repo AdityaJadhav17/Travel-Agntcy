@@ -122,7 +122,6 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
     [conversationMessages],
   )
   const isAgentLoading = view.phase === "pending"
-  const buttonClicked = view.phase === "pending" && view.animate
   const aiReplied = view.phase === "succeeded" || view.phase === "failed"
   const partialResult = view.phase === "pending" ? view.partial : null
   const outboundPreview = view.phase === "pending" ? view.outboundPreview : null
@@ -446,6 +445,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
   const handleClearConversation = () => {
     if (latencyAttempt.current) invalidateAttemptRender(latencyAttempt.current)
     activeChatRef.current = null
+    setShowAgentActivity(false)
     setHistoryError("")
     setMessages([])
     setCurrentChatId(null)
@@ -526,47 +526,43 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
               aria-label="Conversation"
               className="relative flex-1 overflow-y-auto"
             >
-              {/* New Chat Welcome View - Graph + Welcome Section */}
               {showWelcome && (
-                <div className="flex h-full flex-col">
-                  {/* Agent Graph - takes up available space above welcome */}
-                  <div className="min-h-[300px] flex-1">
-                    <MainArea
-                      pattern={selectedPattern}
-                      buttonClicked={buttonClicked}
-                      setButtonClicked={setButtonClicked}
-                      aiReplied={aiReplied}
-                      setAiReplied={ignoreAnimationReply}
-                      chatHeight={chatHeightValue}
-                      isExpanded={isExpanded}
-                      groupCommResponseReceived={false}
-                      onNodeHighlight={() => {}}
-                    />
-                  </div>
-
-                  {/* Welcome Section */}
-                  <div className="flex flex-col items-center justify-center px-4 pb-4">
-                    {/* Airplane Icon - same orientation as logo */}
-                    <div className="mb-4">
-                      <Plane
-                        className="h-12 w-12 text-[#3ce98a]"
-                        strokeWidth={2}
-                      />
-                    </div>
-
-                    {/* Welcome Text */}
-                    <h1 className="mb-2 text-2xl font-semibold text-white">
-                      How can I help you plan your trip?
+                <div className="mx-auto flex min-h-full w-full max-w-[832px] flex-col justify-end px-8 pt-6">
+                  <div className="flex flex-wrap items-center justify-between gap-x-3">
+                    <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
+                      Plan a trip
                     </h1>
-                    <p className="text-gray-400">
-                      Find flights, hotels, and activities for your next
-                      adventure
-                    </p>
+                    <button
+                      type="button"
+                      aria-expanded={showAgentActivity}
+                      aria-controls="welcome-agent-graph"
+                      onClick={() => setShowAgentActivity((open) => !open)}
+                      className="min-h-11 rounded-md text-sm text-gray-400 underline-offset-4 hover:text-gray-200 hover:underline focus-visible:outline-2 focus-visible:outline-emerald-300"
+                    >
+                      {showAgentActivity
+                        ? "Hide agent graph"
+                        : "Show agent graph"}
+                    </button>
+                  </div>
+                  <div id="welcome-agent-graph" hidden={!showAgentActivity}>
+                    {showAgentActivity && (
+                      <div className="h-64">
+                        <MainArea
+                          pattern={selectedPattern}
+                          buttonClicked={false}
+                          setButtonClicked={setButtonClicked}
+                          aiReplied={aiReplied}
+                          setAiReplied={ignoreAnimationReply}
+                          chatHeight={chatHeightValue}
+                          isExpanded={isExpanded}
+                          groupCommResponseReceived={false}
+                          onNodeHighlight={() => {}}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
-
-              {/* Conversation Messages - ChatGPT style */}
               {conversationMessages.length > 0 && (
                 <div className="mx-auto w-full max-w-[768px] px-4 py-6">
                   {conversationMessages.map((msg, index) => (
@@ -581,16 +577,13 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                       ) : (
                         /* Assistant Message - left aligned with avatar */
                         <div className="flex items-start gap-4">
-                          <div
-                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                            style={{
-                              background:
-                                "linear-gradient(135deg, #3ce98a, #5feb9b)",
-                            }}
-                          >
-                            <Plane className="h-4 w-4 text-white" />
+                          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#293c32]">
+                            <Plane
+                              aria-hidden="true"
+                              className="h-4 w-4 text-emerald-200"
+                            />
                           </div>
-                          <div className="flex-1 pt-1 text-[15px]">
+                          <div className="min-w-0 flex-1 pt-1 text-[15px]">
                             <TravelResponseCard
                               content={msg.content}
                               budget={msg.budget_assessment}
@@ -644,14 +637,11 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                   )}
                   {isAgentLoading && (
                     <div className="mb-6 flex items-start gap-4">
-                      <div
-                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
-                        style={{
-                          background:
-                            "linear-gradient(135deg, #3ce98a, #5feb9b)",
-                        }}
-                      >
-                        <Plane className="h-4 w-4 text-white" />
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#293c32]">
+                        <Plane
+                          aria-hidden="true"
+                          className="h-4 w-4 text-emerald-200"
+                        />
                       </div>
                       <div className="min-w-0 flex-1 space-y-3 pt-1">
                         <p role="status" className="text-sm text-emerald-200">
@@ -725,8 +715,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
               )}
             </div>
 
-            {/* Input area - fixed at bottom */}
-            <div className="flex w-full flex-none flex-col items-center justify-end gap-0 bg-[#212121] px-4 pt-2 pb-6">
+            <div className="flex w-full flex-none flex-col items-center justify-end bg-[#212121] px-4 pt-2 pb-6">
               {tripContext && (
                 <TripSummary
                   key={`${currentChatId}-${conversationMessages.length}-${view.phase}`}
@@ -743,6 +732,7 @@ const TravelApp: React.FC<{ onLogout: () => Promise<void> }> = ({
                 setButtonClicked={setButtonClicked}
                 setAiReplied={ignoreAnimationReply}
                 isBottomLayout={true}
+                showTravelStarters={showWelcome}
                 showCoffeePrompts={false}
                 showLogisticsPrompts={false}
                 showProgressTracker={false}

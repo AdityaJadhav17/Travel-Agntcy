@@ -163,7 +163,7 @@ export function chatDisplayReducer(
           event.type === "stop"
             ? {
                 role: "assistant",
-                content: "Search stopped. Late results will be ignored.",
+                content: "Search stopped.",
               }
             : event.message
         views.set(chatId, { phase: outcome })

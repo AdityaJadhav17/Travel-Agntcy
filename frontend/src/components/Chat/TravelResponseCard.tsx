@@ -1176,6 +1176,15 @@ const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
       ? content.slice(prefix.length)
       : content
   const structured = parseTravelResult(travelResult)
+  const hasQuote =
+    structured &&
+    (structured.total_usd !== null ||
+      structured.flights.some((flight) => flight.total_usd !== null) ||
+      structured.hotels.some(
+        (hotel) => hotel.nightly_usd !== null || hotel.total_usd !== null,
+      ) ||
+      !!structured.airport_alternatives?.length ||
+      !!structured.date_alternatives?.length)
   return (
     <>
       {budget && (
@@ -1196,6 +1205,11 @@ const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
       {structured ? (
         <>
           <StructuredTravelResultCard result={structured} allowFlightControls />
+          {hasQuote && !budget && (
+            <p className="mt-3 text-xs text-gray-400">
+              Confirm prices and availability before booking.
+            </p>
+          )}
           <details
             open={structured.kind !== "flight_only"}
             className="mt-4 rounded-xl border border-gray-700 px-4 py-2"
