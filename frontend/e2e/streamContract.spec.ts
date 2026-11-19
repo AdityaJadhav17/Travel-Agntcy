@@ -67,7 +67,7 @@ test("duplicate done and late events cannot replace the saved answer", async ({
   ).toHaveCount(0)
   await page.reload()
   await page
-    .getByRole("navigation", { name: "Chat history" })
+    .getByRole("navigation", { name: "Recent trips" })
     .getByRole("button", { name: "Find flights", exact: true })
     .click()
   await expect(page.getByText("The first complete answer")).toBeVisible()

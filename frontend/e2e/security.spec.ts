@@ -51,6 +51,9 @@ test("local access key unlocks the travel app without being persisted", async ({
   await expect(page.getByText(/provider API keys/i)).toBeVisible()
 
   const keyField = page.getByLabel("Local access key")
+  await expect(keyField).toHaveAccessibleDescription(
+    /\.runtime\/local-access-key\.txt.*TRAVEL_ACCESS_KEY/,
+  )
   await keyField.fill("local-test-key")
   await page.getByRole("button", { name: "Unlock app" }).click()
   await expect(page.getByRole("heading", { name: "Plan a trip" })).toBeVisible()
@@ -62,7 +65,8 @@ test("local access key unlocks the travel app without being persisted", async ({
 
   await page.reload()
   await expect(page.getByRole("heading", { name: "Plan a trip" })).toBeVisible()
-  await page.getByRole("button", { name: "Sign out" }).click()
+  await page.getByRole("button", { name: "Utilities" }).click()
+  await page.getByRole("menuitem", { name: "Sign out" }).click()
   await expect(page.getByLabel("Local access key")).toBeVisible()
 })
 

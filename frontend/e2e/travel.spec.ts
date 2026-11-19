@@ -45,6 +45,7 @@ test("flight time follow-ups keep the trip and show matching quotes", async ({
   expect(evening.travel_result.flights).toMatchObject([
     { departure_time: `${start} 19:00` },
   ])
+  await expect(page.getByRole("article").first()).toContainText("Evening")
   await expect(
     page
       .getByRole("region", { name: "Travel results" })
@@ -70,6 +71,7 @@ test("flight time follow-ups keep the trip and show matching quotes", async ({
   ).toBeVisible()
   const relaxed = await send(page, "Any time")
   expect(relaxed.travel_result.flights).toHaveLength(3)
+  expect(relaxed.travel_result.departure_period_legs).toEqual([])
 
   const ambiguous = await send(page, "After 7")
   expect(ambiguous.travel_result).toBeFalsy()
@@ -140,13 +142,20 @@ test("structured cards survive rewritten narrative and reload", async ({
     cards.getByRole("heading", { name: "Fixture Air" }),
   ).toBeVisible()
   await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
+  const notes = page.getByRole("menuitem", {
+    name: "Original response",
+    exact: true,
+  })
+  await expect(
+    page.getByText("Narrative wording changed after search."),
+  ).toBeHidden()
+  await cards.getByRole("button", { name: "Result actions" }).click()
+  await notes.click()
   await expect(
     page.getByText("Narrative wording changed after search."),
   ).toBeVisible()
   await page.reload()
-  await page
-    .getByRole("button", { name: "Plan Dallas to New York", exact: true })
-    .click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
 })
 
@@ -169,15 +178,39 @@ test("renders requested counts, accommodation evidence and provisional timing la
         hotel.accommodation_evidence_source = "serpapi_google_hotels"
         hotel.accommodation_status = "matched"
         hotel.accommodation_reasons = [
+          "hotel_property_evidence",
           "private_room_evidence",
-          "room_privacy_unverified",
         ]
+        hotel.total_usd = 250
+        hotel.nightly_usd = 125
         hotel.check_in_date = start
         hotel.check_out_date = end
         hotel.timing_status = "needs_confirmation"
         hotel.timing_message = "Late arrival retention needs confirmation."
         hotel.arrival_at_hotel = `${start} 00:30`
         hotel.provisional = true
+        result.hotels = [
+          hotel,
+          {
+            ...hotel,
+            id: "fixture-nightly-only",
+            name: "Nightly Quote",
+            total_usd: null,
+            accommodation_status: "contradicted",
+            accommodation_reasons: ["shared_room_evidence"],
+            room_type: "shared room",
+          },
+          {
+            ...hotel,
+            id: "fixture-price-unavailable",
+            name: "No Quote",
+            total_usd: null,
+            nightly_usd: null,
+            accommodation_status: "unknown",
+            accommodation_reasons: ["room_privacy_unverified"],
+            room_type: null,
+          },
+        ]
       }
       result.hotel_check_in_date = start
       result.hotel_check_out_date = end
@@ -202,22 +235,61 @@ test("renders requested counts, accommodation evidence and provisional timing la
   await expect(cards.getByText("Fixture Activity 1")).toBeVisible()
   await expect(cards.getByText("Fixture Activity 3")).toBeVisible()
   await expect(cards.getByText("Fixture Activity 4")).toHaveCount(0)
+  await expect(cards.getByText(/Listed as a private room/)).toHaveClass(
+    /text-travel-muted/,
+  )
+  const fullStay = cards.getByRole("article").filter({
+    has: page.getByRole("heading", { name: "Fixture Central Hotel" }),
+  })
+  const nightly = cards
+    .getByRole("article")
+    .filter({ has: page.getByRole("heading", { name: "Nightly Quote" }) })
+  const unpriced = cards
+    .getByRole("article")
+    .filter({ has: page.getByRole("heading", { name: "No Quote" }) })
+  await expect(fullStay.getByText("$250.00 full stay")).toHaveClass(
+    /font-semibold/,
+  )
+  await expect(nightly.getByText("$125.00 nightly")).toHaveClass(
+    /font-semibold/,
+  )
+  await expect(nightly.getByText(/Full-stay price unavailable/)).toBeVisible()
   await expect(
-    cards.getByText("Accommodation preference matched"),
+    unpriced.getByText("Price unavailable", { exact: true }),
   ).toBeVisible()
-  await expect(cards.getByText(/hotel \/ private room/)).toBeVisible()
-  await expect(cards.getByText(/Evidence: SerpAPI Google Hotels/)).toBeVisible()
+  await expect(nightly.getByText("Shared room only")).toHaveClass(
+    /text-travel-warning/,
+  )
+  await expect(unpriced.getByText("Room privacy unconfirmed")).toHaveClass(
+    /text-travel-warning/,
+  )
+  await expect(
+    fullStay.getByText(/Evidence: SerpAPI Google Hotels/),
+  ).toBeHidden()
+  await fullStay.getByText("Room details", { exact: true }).click()
+  await expect(fullStay.getByText(/hotel \/ private room/)).toBeVisible()
+  await expect(
+    fullStay.getByText(/Evidence: SerpAPI Google Hotels/),
+  ).toBeVisible()
   await expect(
     cards.getByText(/The provider identifies this as a private room\./),
   ).toBeVisible()
   await expect(cards.getByText(/private_room_evidence/)).toHaveCount(0)
   await expect(
-    cards.getByText(/Provisional: Late arrival retention needs confirmation/),
+    fullStay.getByText(
+      /Late check-in needs confirmation. Ask the property if it will hold your room./,
+    ),
   ).toBeVisible()
-  await expect(cards.getByText(`Stay: ${start} to ${end}`)).toBeVisible()
+  const dateRange = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).formatRange(new Date(start), new Date(end))
+  await expect(fullStay.getByText(`Stay: ${dateRange}`)).toBeVisible()
 })
 
-test("legacy hotel cards render unknown accommodation without privacy claims", async ({
+test("legacy hotel cards render without unsupported preference claims", async ({
   page,
 }) => {
   await page.route("**/agent/prompt/stream", async (route) => {
@@ -262,7 +334,9 @@ test("legacy hotel cards render unknown accommodation without privacy claims", a
   const cards = page.getByRole("region", { name: "Travel results" })
   await expect(
     cards.getByText("Accommodation type or room details unverified"),
-  ).toBeVisible()
+  ).toHaveCount(0)
+  await expect(cards.getByText("Fixture Central Hotel")).toBeVisible()
+  await expect(cards.getByText("Room details", { exact: true })).toHaveCount(0)
   await expect(cards.getByText(/private room/i)).toHaveCount(0)
 })
 
@@ -294,7 +368,8 @@ test("three requested activities match the response and persisted cards", async 
   await page.reload()
   await page
     .getByRole("button", {
-      name: /^Find three things to do/,
+      name: "Count City",
+      exact: true,
     })
     .click()
   await expect(
@@ -402,9 +477,7 @@ test("nearby arrival airports compare real fares and ground distance", async ({
   await expect(cards.getByText(/driving miles/).first()).toBeVisible()
   await expect(cards.getByText(/lower airfare than SBP/).first()).toBeVisible()
   await page.reload()
-  await page
-    .getByRole("button", { name: /^Flights only from Dallas to SBP/ })
-    .click()
+  await page.getByRole("button", { name: "DFW → SBP", exact: true }).click()
   await expect(cards.getByText(/LAX · Los Angeles/)).toBeVisible()
 })
 
@@ -434,9 +507,7 @@ test("flight explanation and nearby dates remain grounded after reload", async (
   expect(why.response).toContain("Option 1")
   expect(why.response).toContain("USD 240.00")
   await page.reload()
-  await page
-    .getByRole("button", { name: /^Flights only from Dallas to New Yor/ })
-    .click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   await expect(page.getByText("Nearby travel dates")).toBeVisible()
 })
 
@@ -453,9 +524,7 @@ test("hotel failure keeps flights and retries hotels after reload", async ({
   expect(partial.partial_search.flights).toHaveLength(1)
   await expect(page.getByRole("button", { name: "Retry hotels" })).toBeVisible()
   await page.reload()
-  await page
-    .getByRole("button", { name: /^Plan Dallas to New York with transi/ })
-    .click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   const response = page.waitForResponse((reply) =>
     reply.url().endsWith("/agent/prompt/stream"),
   )
@@ -496,7 +565,7 @@ test("explains a retained trip after reload and does not leak it to a new chat",
   const found = await send(page, `${start} to ${end}`)
   expect(found.recommendation.version).toBe(2)
   await page.reload()
-  await page.getByRole("button", { name: prompt, exact: true }).click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   const explained = await send(page, "Why this one?")
   expect(explained.recommendation).toEqual(found.recommendation)
   await expect(page.getByText("Why this trip?", { exact: true })).toBeVisible()
@@ -506,7 +575,7 @@ test("explains a retained trip after reload and does not leak it to a new chat",
   await expect(
     page.getByText(/USD 240.00 flight fare \+ USD 300.00 full hotel stay/),
   ).toBeVisible()
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   const empty = await send(page, "Why this trip?")
   expect(empty.recommendation).toBeNull()
   await expect(
@@ -523,9 +592,7 @@ test("keeps the selected flight while changing only the hotel after reload", asy
   expect(first.recommendation.hotel.name).toBe("Fixture Central Hotel")
   const flightId = first.recommendation.flight.id
   await page.reload()
-  await page
-    .getByRole("button", { name: "Plan Dallas to New York", exact: true })
-    .click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   const swapped = await send(page, "Keep the flights, change the hotel")
   expect(swapped.recommendation.flight.id).toBe(flightId)
   expect(swapped.recommendation.hotel.name).toBe("Fixture Riverside Hotel")
@@ -533,7 +600,7 @@ test("keeps the selected flight while changing only the hotel after reload", asy
     first.recommendation.hotel.id,
   )
   await expect(
-    page.getByText(/I kept your selected flight and found a different hotel/),
+    page.getByText(/Same flight, different hotel for your dates and travelers/),
   ).toBeVisible()
   await expect(page.getByText(/Activities were not refreshed/)).toBeVisible()
   const explained = await send(page, "Why this one?")
@@ -562,9 +629,7 @@ test("clarifies, searches real agents, reloads and corrects the destination", as
   await expect(page.getByText(/Fixture Central Hotel/).first()).toBeVisible()
   await expect(page.getByText(/Fixture City Museum/).first()).toBeVisible()
   await page.reload()
-  await page
-    .getByRole("button", { name: "Plan a trip to New York.", exact: true })
-    .click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   const corrected = await send(page, "Actually Boston.")
   expect(corrected.conversation_id).toBe(first.conversation_id)
   expect(corrected.trip_state).toMatchObject({
@@ -573,7 +638,12 @@ test("clarifies, searches real agents, reloads and corrects the destination", as
     start_date: start,
     end_date: end,
   })
-  await expect(page.getByText(/Fixture Central Hotel/).last()).toBeVisible()
+  await expect(
+    page
+      .getByRole("region", { name: "Travel results" })
+      .getByText("Fixture Central Hotel", { exact: true })
+      .last(),
+  ).toBeVisible()
 })
 
 test("trip details reflect clarification, and edits require review in the active chat", async ({
@@ -581,6 +651,14 @@ test("trip details reflect clarification, and edits require review in the active
 }) => {
   await page.goto("/")
   const summary = page.getByRole("region", { name: "Trip details" })
+  const latestResult = page
+    .getByRole("region", { name: "Travel results" })
+    .last()
+  const openTripEditor = async () => {
+    const toggle = summary.getByRole("button", { name: "Edit trip" })
+    if ((await toggle.getAttribute("aria-expanded")) !== "true")
+      await toggle.click()
+  }
   let searchRequests = 0
   page.on("request", (request) => {
     if (
@@ -591,13 +669,15 @@ test("trip details reflect clarification, and edits require review in the active
   })
   const first = await send(page, "Flights only to New York")
   await expect(summary).toContainText("Origin not set → JFK")
-  await expect(summary).toContainText("Not set")
+  await expect(summary).toContainText("Dates not set")
+  await openTripEditor()
   await summary.getByRole("button", { name: "Change dates" }).click()
   await summary.getByRole("button", { name: "Cancel" }).click()
   expect(searchRequests).toBe(1)
 
   await send(page, `Dallas ${start} to ${end}`)
-  await expect(summary).toContainText("DFW → JFK")
+  await expect(latestResult).toContainText("DFW → JFK")
+  await openTripEditor()
   await summary.getByRole("button", { name: "Change dates" }).click()
   const dateReview = summary.getByRole("form", { name: "Review dates" })
   await expect(dateReview.getByLabel("Departure")).toHaveValue(start)
@@ -626,6 +706,7 @@ test("trip details reflect clarification, and edits require review in the active
     end_date: end,
   })
 
+  await openTripEditor()
   await summary.getByRole("button", { name: "Edit travelers" }).click()
   const travelerReview = summary.getByRole("form", { name: "Review travelers" })
   await travelerReview.getByLabel("Adults").fill("2")
@@ -646,23 +727,20 @@ test("trip details reflect clarification, and edits require review in the active
     children: 1,
     children_ages: [7],
   })
-  await expect(summary).toContainText("2 adults · 1 child")
+  await expect(latestResult).toContainText("2 adults, 1 child")
   expect(searchRequests).toBe(4)
 
+  await openTripEditor()
   await summary.getByRole("button", { name: "Change dates" }).click()
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   await expect(summary).toHaveCount(0)
-  await page
-    .getByRole("button", { name: "Flights only to New York", exact: true })
-    .click()
-  await expect(summary).toContainText("2 adults · 1 child")
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
+  await expect(latestResult).toContainText("2 adults, 1 child")
   await expect(dateReview).toHaveCount(0)
   await page.reload()
-  await page
-    .getByRole("button", { name: "Flights only to New York", exact: true })
-    .click()
-  await expect(summary).toContainText("DFW → JFK")
-  await expect(summary).toContainText("2 adults · 1 child")
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
+  await expect(latestResult).toContainText("DFW → JFK")
+  await expect(latestResult).toContainText("2 adults, 1 child")
 })
 
 test("a late answer stays with its chat and new chats start without trip context", async ({
@@ -671,22 +749,20 @@ test("a late answer stays with its chat and new chats start without trip context
   await page.goto("/")
   await send(page, "Plan New York.")
   await send(page, "Dallas.")
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   const response = page.waitForResponse((reply) =>
     reply.url().endsWith("/agent/prompt/stream"),
   )
   await page.getByRole("textbox").fill("Plan Tokyo.")
   await page.getByRole("textbox").press("Enter")
-  await page
-    .getByRole("button", { name: "Plan New York.", exact: true })
-    .click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   const tokyo = await observedStreamResult(page, await response)
   expect(tokyo.trip_state.destination).toBe("NRT")
   expect(tokyo.trip_state.origin).toBeFalsy()
   await expect(
     page.getByText(/What date would you like to leave/),
   ).toBeVisible()
-  await page.getByRole("button", { name: "Plan Tokyo.", exact: true }).click()
+  await page.getByRole("button", { name: "NRT", exact: true }).click()
   await expect(page.getByText(/Where will you be flying from/)).toBeVisible()
   await expect(page.getByText(/What date would you like to leave/)).toHaveCount(
     0,
@@ -699,21 +775,24 @@ test("deleting a chat clears the browser and permanently deletes its server memo
 }) => {
   await page.goto("/")
   const result = await send(page, "Plan Tokyo.")
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
-  await page.getByRole("button", { name: "Plan Tokyo.", exact: true }).focus()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
+  await page.getByRole("button", { name: "NRT", exact: true }).focus()
   await page.keyboard.press("Tab")
-  const deleteChat = page.getByRole("button", {
-    name: "Delete chat: Plan Tokyo.",
-    exact: true,
-  })
-  await expect(deleteChat).toBeFocused()
-  await expect(deleteChat).toHaveCSS("opacity", "1")
-  await page.keyboard.press("Enter")
+  const menu = page.getByRole("button", { name: "Trip actions: NRT" })
+  await expect(menu).toBeFocused()
+  await menu.press("Enter")
+  const remove = page.getByRole("menuitem", { name: "Delete trip" })
+  await expect(remove).toBeFocused()
+  await remove.press("Enter")
+  const confirmation = page.getByRole("alertdialog", { name: "Delete trip?" })
+  await expect(confirmation).toHaveAccessibleDescription(/NRT/)
+  await confirmation.getByRole("button", { name: "Delete trip" }).click()
+  await expect(page.getByRole("button", { name: "New trip" })).toBeFocused()
   await expect(
-    page.getByRole("button", { name: "Plan Tokyo.", exact: true }),
+    page.getByRole("button", { name: "NRT", exact: true }),
   ).toHaveCount(0)
   await page.reload()
-  await expect(page.getByText("No conversation history")).toBeVisible()
+  await expect(page.getByText("No saved trips yet")).toBeVisible()
   const retry = await request.post(`${api}/agent/prompt`, {
     data: {
       prompt: "Dallas",
@@ -783,9 +862,7 @@ test("budget survives corrections and reload, can be revised and removed", async
     page.getByRole("region", { name: "Budget assessment" }).last(),
   ).toContainText("USD 40.00 over")
   await page.reload()
-  await page
-    .getByRole("button", { name: "Plan New York. Budget USD 500", exact: true })
-    .click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   await expect(
     page.getByRole("region", { name: "Budget assessment" }).last(),
   ).toContainText("USD 40.00 over")
@@ -799,14 +876,19 @@ test("budget survives corrections and reload, can be revised and removed", async
   await expect(
     page.getByRole("region", { name: "Budget assessment" }).last(),
   ).toContainText("USD 60.00 remaining")
-  await expect(page.getByText(/Fixture Central Hotel/).last()).toBeVisible()
+  await expect(
+    page
+      .getByRole("region", { name: "Travel results" })
+      .getByText("Fixture Central Hotel", { exact: true })
+      .last(),
+  ).toBeVisible()
   const foreign = await send(page, "Budget EUR 600")
   expect(foreign.budget_assessment).toBeNull()
   await expect(page.getByText(/cannot convert your EUR budget/)).toBeVisible()
   const cleared = await send(page, "Remove budget")
   expect(cleared.trip_state.budget_amount).toBeNull()
   expect(cleared.budget_assessment).toBeNull()
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   const separate = await send(page, "Plan Tokyo.")
   expect(separate.trip_state.budget_amount).toBeNull()
 })
@@ -831,10 +913,12 @@ test("family counts survive clarification and reload and change quoted totals", 
     quoted_total: 1080,
   })
   await expect(
-    page.getByText(/Travelers: 2 adults, 1 child/).last(),
+    page
+      .getByRole("region", { name: "Travel results" })
+      .getByText(/2 adults, 1 child/),
   ).toBeVisible()
   await page.reload()
-  await page.getByRole("button", { name: /^Plan New York from Dallas/ }).click()
+  await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
   const correction = await send(page, "Actually Boston")
   expect(correction.trip_state).toMatchObject({
     destination: "BOS",
@@ -851,7 +935,7 @@ test("family counts survive clarification and reload and change quoted totals", 
     children_ages: [],
   })
   expect(solo.budget_assessment.quoted_total).toBe(540)
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   const separate = await send(page, "Plan Tokyo")
   expect(separate.trip_state).toMatchObject({
     adults: 1,

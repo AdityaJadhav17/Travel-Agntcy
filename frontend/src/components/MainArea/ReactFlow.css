@@ -165,3 +165,67 @@ marker circle {
   opacity: 0 !important;
   pointer-events: none !important;
 }
+
+.travel-ui .react-flow {
+  --node-background: var(--travel-surface);
+  --node-background-hover: var(--travel-raised);
+  --node-background-active: var(--travel-selected);
+  --node-text-primary: var(--travel-text);
+  --node-text-secondary: var(--travel-muted);
+  --node-icon-background: var(--travel-accent-soft);
+  --custom-node-background: var(--travel-raised);
+  --custom-node-border: var(--travel-border);
+  --edge-label-background: var(--travel-raised);
+  --edge-label-background-active: var(--travel-accent-soft);
+  --edge-label-text: var(--travel-muted);
+  --edge-label-text-active: var(--travel-accent);
+  --accent-border: var(--travel-accent);
+  --group-background: var(--travel-raised);
+  --shadow-default: #0002;
+
+  background: var(--travel-canvas) !important;
+  color: var(--travel-text);
+}
+
+.travel-ui .react-flow__background {
+  fill: var(--travel-canvas) !important;
+}
+
+body[data-theme="light"]
+  .travel-ui
+  .bg-node-background-active
+  :is(.text-node-text-primary, .text-node-text-secondary) {
+  color: var(--travel-text);
+}
+
+.travel-ui .react-flow__controls {
+  background: var(--travel-surface);
+  border: 1px solid var(--travel-control);
+}
+
+.travel-ui .react-flow__controls-button {
+  color: var(--travel-text);
+}
+
+.travel-ui .react-flow__controls-button:hover {
+  background: var(--travel-raised);
+}
+
+.travel-ui .react-flow__controls-button::before {
+  background: var(--travel-surface);
+  color: var(--travel-text);
+  border-color: var(--travel-border);
+}
+
+.travel-ui .react-flow__controls-button::after {
+  border-right-color: var(--travel-surface);
+}
+
+.travel-ui .react-flow__edge path {
+  stroke: var(--travel-accent) !important;
+}
+
+.travel-ui .react-flow :is(marker, marker *, .react-flow__arrowhead) {
+  fill: var(--travel-accent) !important;
+  stroke: var(--travel-accent) !important;
+}

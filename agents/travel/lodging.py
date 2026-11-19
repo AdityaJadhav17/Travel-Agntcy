@@ -203,7 +203,9 @@ def assess_timing(flight, hotel, check_in_date=None, check_out_date=None, gap_ho
 def _timing_message(status, reasons, arrival):
     stamp = arrival.strftime("%Y-%m-%d %H:%M") if arrival else "unknown"
     if "prior_night_booking_or_late_arrival_needs_confirmation" in reasons:
-        return f"Estimated hotel arrival is {stamp}, after the booked check-in date; confirm late arrival and reservation retention with the property."
+        return f"Estimated hotel arrival is {stamp}, after your check-in date. Ask the property if you can check in late and whether it will hold your room."
+    if "arrival_after_provider_checkin_window" in reasons:
+        return f"Estimated hotel arrival is {stamp}, after the listed check-in hours. Ask the property if you can check in late."
     if "arrival_at_or_after_checkout" in reasons:
         return "The estimated arrival is at or after checkout, so this stay cannot cover the arrival."
     if "arrival_on_checkout_date_needs_confirmation" in reasons:

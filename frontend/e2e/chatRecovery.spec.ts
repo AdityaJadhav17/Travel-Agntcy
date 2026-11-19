@@ -84,7 +84,7 @@ test("background chats keep progress, partial cards, and text through selection 
   await controlledStreams(page)
   await page.goto("/")
   await submit(page, "First trip")
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   await submit(page, "Second trip")
   await emit(page, "First trip", {
     type: "status",
@@ -118,7 +118,12 @@ test("background chats keep progress, partial cards, and text through selection 
           departure_time: "10:00",
           arrival_time: "12:00",
           stops: 0,
-          return_flight: null,
+          return_flight: {
+            airline: "Retained Air",
+            departure_time: "15:00",
+            arrival_time: "18:00",
+            stops: 0,
+          },
         },
       ],
       hotels: [],
@@ -164,10 +169,14 @@ test("reload exposes recovery without auto-starting, and replays the saved reque
   const savedResult = await savedResponse.json()
   try {
     await observeTravelStreams(page)
-    await page.goto("/")
     // The server committed, but the browser lost its response before reload.
-    await page.evaluate(
-      ({ key, chat }) => localStorage.setItem(key, JSON.stringify([chat])),
+    // Seed before React reads or persists history, and only on the first load.
+    await page.addInitScript(
+      ({ key, chat }) => {
+        if (sessionStorage.getItem("recoveryFixtureSeeded")) return
+        localStorage.setItem(key, JSON.stringify([chat]))
+        sessionStorage.setItem("recoveryFixtureSeeded", "true")
+      },
       {
         key: historyKey,
         chat: {
@@ -185,10 +194,10 @@ test("reload exposes recovery without auto-starting, and replays the saved reque
       if (outgoing.url().endsWith("/agent/prompt/stream"))
         requests.push(outgoing.postDataJSON())
     })
-    await page.reload()
+    await page.goto("/")
     await page.getByRole("button", { name: prompt, exact: true }).click()
     await expect(page.getByRole("status")).toContainText(
-      "This search was interrupted",
+      "Your search was interrupted",
     )
     await expect(page.getByRole("textbox")).toBeEnabled()
     expect(requests).toHaveLength(0)
@@ -198,7 +207,7 @@ test("reload exposes recovery without auto-starting, and replays the saved reque
       { times: 1 },
     )
     await page
-      .getByRole("button", { name: "Retry last message", exact: true })
+      .getByRole("button", { name: "Retry search", exact: true })
       .click()
     await expect(page.getByRole("status")).toContainText(
       "The travel connection was interrupted",
@@ -206,17 +215,20 @@ test("reload exposes recovery without auto-starting, and replays the saved reque
     await page.reload()
     await page.getByRole("button", { name: prompt, exact: true }).click()
     await expect(
-      page.getByRole("button", { name: "Retry last message", exact: true }),
+      page.getByRole("button", { name: "Retry search", exact: true }),
     ).toBeVisible()
     const replay = page.waitForResponse((reply) =>
       reply.url().endsWith("/agent/prompt/stream"),
     )
-    await page
-      .getByRole("button", { name: "Retry last message", exact: true })
-      .click()
+    const retry = page.getByRole("button", {
+      name: "Retry search",
+      exact: true,
+    })
+    await retry.focus()
+    await retry.press("Enter")
     expect(await observedStreamResult(page, await replay)).toEqual(savedResult)
     await expect(
-      page.getByRole("button", { name: "Retry last message", exact: true }),
+      page.getByRole("button", { name: "Retry search", exact: true }),
     ).toHaveCount(0)
     expect(requests).toEqual([
       { prompt, conversation_id: conversationId, request_id: requestId },
@@ -231,9 +243,9 @@ test("reload exposes recovery without auto-starting, and replays the saved reque
     ).toEqual(["user", "assistant"])
     expect(history[0].pendingRequest).toBeUndefined()
     await page.reload()
-    await page.getByRole("button", { name: prompt, exact: true }).click()
+    await page.getByRole("button", { name: "DFW → JFK", exact: true }).click()
     await expect(
-      page.getByRole("button", { name: "Retry last message", exact: true }),
+      page.getByRole("button", { name: "Retry search", exact: true }),
     ).toHaveCount(0)
   } finally {
     await request.delete(`${api}/conversations/${conversationId}`)
@@ -251,12 +263,12 @@ test("reload of a live stream shows recovery, while stopped chats stay stopped",
     .getByRole("button", { name: "Interrupted trip", exact: true })
     .click()
   await expect(
-    page.getByRole("button", { name: "Retry last message", exact: true }),
+    page.getByRole("button", { name: "Retry search", exact: true }),
   ).toBeVisible()
   await expect(
     page.getByRole("button", { name: "Stop", exact: true }),
   ).toHaveCount(0)
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   await submit(page, "Stopped trip")
   await page.getByRole("button", { name: "Stop", exact: true }).click()
   await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
@@ -264,7 +276,7 @@ test("reload of a live stream shows recovery, while stopped chats stay stopped",
   await page.getByRole("button", { name: "Stopped trip", exact: true }).click()
   await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()
   await expect(
-    page.getByRole("button", { name: "Retry last message", exact: true }),
+    page.getByRole("button", { name: "Retry search", exact: true }),
   ).toHaveCount(0)
 })
 
@@ -277,7 +289,24 @@ test("failed deletion of a running chat restores an editable stopped view", asyn
   )
   await page.goto("/")
   await submit(page, "Delete retry")
-  await page.getByRole("button", { name: "Delete chat" }).click()
+  await page.getByRole("button", { name: "Delete retry", exact: true }).hover()
+  await page.getByRole("button", { name: "Trip actions: Delete retry" }).click()
+  await page.getByRole("menuitem", { name: "Delete trip" }).click()
+  const confirmation = page.getByRole("alertdialog", { name: "Delete trip?" })
+  await expect(confirmation).toHaveAccessibleDescription(/Delete retry/)
+  await expect(
+    confirmation.getByRole("button", { name: "Cancel" }),
+  ).toBeFocused()
+  await confirmation.getByRole("button", { name: "Cancel" }).click()
+  await expect(
+    page.getByRole("button", { name: "Trip actions: Delete retry" }),
+  ).toBeFocused()
+  await expect(
+    page.getByRole("button", { name: "Stop", exact: true }),
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Trip actions: Delete retry" }).click()
+  await page.getByRole("menuitem", { name: "Delete trip" }).click()
+  await confirmation.getByRole("button", { name: "Delete trip" }).click()
   await expect(
     page.getByText(
       "Could not delete the saved conversation. Please try again.",
@@ -289,4 +318,121 @@ test("failed deletion of a running chat restores an editable stopped view", asyn
     page.getByRole("button", { name: "Stop", exact: true }),
   ).toHaveCount(0)
   await submit(page, "Try again")
+})
+
+test("mobile trips drawer confines focus, dismisses, and preserves the conversation", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await controlledStreams(page)
+  await page.goto("/")
+  await submit(page, "Mobile trip")
+  const toggle = page.getByRole("button", { name: "Open sidebar" })
+  const drawer = page.getByRole("dialog", { name: "Trips" })
+  const close = drawer.getByRole("button", { name: "Close sidebar" })
+  const actions = drawer.getByRole("button", {
+    name: "Trip actions: Mobile trip",
+  })
+
+  await toggle.click()
+  await expect(close).toBeFocused()
+  await page.keyboard.press("Shift+Tab")
+  await expect(actions).toBeFocused()
+  await actions.press("Enter")
+  await expect(
+    drawer.getByRole("menuitem", { name: "Delete trip" }),
+  ).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(actions).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(drawer).toHaveCount(0)
+  await expect(toggle).toBeFocused()
+
+  await toggle.click()
+  await page.mouse.click(370, 120)
+  await expect(drawer).toHaveCount(0)
+  await expect(toggle).toBeFocused()
+
+  await toggle.click()
+  await close.click()
+  await expect(drawer).toHaveCount(0)
+  await expect(toggle).toBeFocused()
+
+  await toggle.click()
+  await drawer.getByRole("button", { name: "Mobile trip", exact: true }).click()
+  await expect(drawer).toHaveCount(0)
+  await expect(toggle).toBeFocused()
+  await expect(page.getByText("Searching Mobile trip")).toBeVisible()
+
+  await toggle.click()
+  await drawer.getByRole("button", { name: "New trip" }).click()
+  await expect(drawer).toHaveCount(0)
+  await expect(toggle).toBeFocused()
+  await expect(page.getByRole("textbox")).toBeEditable()
+})
+
+test("recent trips show saved routes and group longer history by calendar day", async ({
+  page,
+}) => {
+  await page.clock.setFixedTime(new Date(2027, 0, 31, 1))
+  await page.addInitScript(
+    ({ key }) => {
+      const dates = [31, 30, 28, 24, 1, 0]
+      const trips = dates.map((day, index) => ({
+        id: `saved-${index}`,
+        title: `Saved prompt ${index}`,
+        timestamp: new Date(2027, 0, day, index === 0 ? 0 : 23).toISOString(),
+        messages: [
+          { role: "user", content: `Saved prompt ${index}` },
+          {
+            role: "assistant",
+            content: `Saved answer ${index}`,
+            ...(index === 0
+              ? {
+                  trip_state: {
+                    search_type: "flight_only",
+                    origin: "DFW",
+                    destination: "JFK",
+                    start_date: "2027-03-01",
+                    is_one_way: true,
+                  },
+                }
+              : {}),
+          },
+        ],
+      }))
+      localStorage.setItem(key, JSON.stringify(trips))
+    },
+    { key: historyKey },
+  )
+  await page.goto("/")
+
+  const recent = page.getByRole("navigation", { name: "Recent trips" })
+  const route = recent.getByRole("button", { name: "DFW → JFK", exact: true })
+  await expect(
+    recent
+      .getByRole("region", { name: "Today" })
+      .getByRole("button", { name: "DFW → JFK", exact: true }),
+  ).toBeVisible()
+  await expect(route).toHaveAccessibleDescription(
+    "Mar 1, 2027 Flights · One-way",
+  )
+  for (const [group, index] of [
+    ["Yesterday", 1],
+    ["Previous 7 days", 2],
+    ["Previous 7 days", 3],
+    ["Previous 30 days", 4],
+    ["Older", 5],
+  ] as const) {
+    await expect(
+      recent
+        .getByRole("region", { name: group })
+        .getByRole("button", { name: `Saved prompt ${index}`, exact: true }),
+    ).toBeVisible()
+  }
+  await route.click()
+  await expect(route).toHaveAttribute("aria-current", "true")
+  await expect(page.getByText("Saved answer 0", { exact: true })).toBeVisible()
 })

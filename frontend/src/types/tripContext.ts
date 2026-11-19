@@ -33,6 +33,24 @@ const date = (value: unknown) => {
     ? day
     : ""
 }
+const dateFormat = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+  timeZone: "UTC",
+})
+
+export function formatTripDates(start: string, end: string) {
+  const first = date(start)
+  const last = date(end)
+  if (first && last && first <= last)
+    return dateFormat.formatRange(new Date(first), new Date(last))
+  return [start, end]
+    .filter(Boolean)
+    .map((value) => (date(value) ? dateFormat.format(new Date(value)) : value))
+    .join(" – ")
+}
+
 const count = (value: unknown, min: number, max: number) =>
   typeof value === "number" &&
   Number.isInteger(value) &&
@@ -109,7 +127,13 @@ export function latestTripContext(
       result.kind !== "airport_comparison" &&
       result.kind !== "date_comparison"
     )
-      return parseTripContext({ ...result, search_type: result.kind })
+      return parseTripContext({
+        ...result,
+        search_type: result.kind,
+        origin: result.origin_airport || result.origin,
+        destination: result.destination_airport || result.destination,
+        location: result.destination,
+      })
   }
   return null
 }

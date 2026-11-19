@@ -64,6 +64,7 @@ def test_recent_flight_is_reused_and_only_replacement_hotels_are_searched(monkey
     assert "USD" in result["budget_assessment"]["message"]
     assert "Total Cost: $615.00" in result["full_response"]
     assert "Activities were not refreshed" in result["full_response"]
+    assert "Activities were not refreshed" in result["travel_result"]["notice"]
 
 
 def test_expired_quote_is_rechecked_for_same_itinerary_and_new_price(monkeypatch):
@@ -77,7 +78,7 @@ def test_expired_quote_is_rechecked_for_same_itinerary_and_new_price(monkeypatch
     assert result["recommendation"]["flight"]["id"] == saved["flight"]["id"]
     assert result["recommendation"]["flight"]["total_usd"] == 310
     assert "Total Cost: $685.00" in result["full_response"]
-    assert "refreshed the same flight itinerary" in result["full_response"]
+    assert "The fare was checked again." in result["travel_result"]["notice"]
 
 
 @pytest.mark.parametrize("current", [[], [{"airline": "Different Air", "price": 250, "currency": "USD"}]])

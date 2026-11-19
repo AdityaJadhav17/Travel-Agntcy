@@ -150,7 +150,7 @@ text are never persisted as completed answers. A pending history entry includes
 `interrupted`, including legacy records without that metadata. Invalid history
 entries are skipped. Completed, failed and stopped turns stay terminal.
 
-The recovery notice offers **Retry last message**. It never auto-submits. Retry
+The recovery notice offers **Retry search**. It never auto-submits. Retry
 keeps the original user bubble and, when valid saved identity exists, sends the
 same conversation ID, request ID and prompt through the existing stream API.
 The backend can replay a committed result without duplicating that turn. If the

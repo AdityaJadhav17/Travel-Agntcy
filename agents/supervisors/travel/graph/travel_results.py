@@ -19,20 +19,25 @@ from .recommendations import clean_text, quote_facts
 PARTIAL_RETURN_NOTICE = "Some returns could not be checked. Showing verified fares."
 
 
+class FlightConnection(BaseModel):
+    airport: str = Field(pattern=r"^[A-Z]{3}$")
+    duration_minutes: int | None = Field(default=None, ge=1, le=4320)
+
+
 class ReturnFlightCard(BaseModel):
     airline: str = Field(max_length=160)
     departure_time: str = Field(max_length=160)
     arrival_time: str = Field(max_length=160)
     stops: int = Field(ge=0)
+    duration_minutes: int | None = Field(default=None, ge=1, le=4320)
+    connections: list[FlightConnection] = Field(default_factory=list, max_length=10)
+    arrival_airport: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
 
 
-class FlightCard(BaseModel):
+class FlightCard(ReturnFlightCard):
     id: str
-    airline: str = Field(max_length=160)
     total_usd: float | None = Field(ge=0, allow_inf_nan=False)
-    departure_time: str = Field(max_length=160)
-    arrival_time: str = Field(max_length=160)
-    stops: int = Field(ge=0)
+    price_scope: Literal["requested_party", "per_traveler"] | None = None
     return_flight: ReturnFlightCard | None = None
 
 
@@ -98,6 +103,10 @@ class TravelResult(BaseModel):
     searched_at: datetime
     origin: str = Field(default="", max_length=160)
     destination: str = Field(default="", max_length=160)
+    origin_airport: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    destination_airport: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
+    origin_city: str | None = Field(default=None, max_length=160)
+    destination_city: str | None = Field(default=None, max_length=160)
     start_date: str = Field(default="", max_length=32)
     end_date: str = Field(default="", max_length=32)
     hotel_check_in_date: str | None = Field(default=None, max_length=10)
@@ -105,11 +114,14 @@ class TravelResult(BaseModel):
     flight_result_count: int | None = Field(default=None, ge=1, le=100)
     hotel_result_count: int | None = Field(default=None, ge=1, le=100)
     activity_result_count: int | None = Field(default=None, ge=1, le=100)
+    departure_period_legs: list[Literal["outbound", "return"]] = Field(default_factory=list, max_length=2)
     adults: int = Field(ge=1, le=9)
     children: int = Field(ge=0, le=8)
     rooms: int = Field(ge=1, le=9)
     is_one_way: bool
     flights: list[FlightCard] = Field(default_factory=list, max_length=5)
+    incomplete_flights: list[FlightCard] = Field(default_factory=list, max_length=5)
+    incomplete_flight_count: int = Field(default=0, ge=0)
     hotels: list[HotelCard] = Field(default_factory=list, max_length=5)
     activities: list[ActivityCard] = Field(default_factory=list, max_length=5)
     requested_airport: str = Field(default="", max_length=3)
@@ -123,8 +135,8 @@ class TravelResult(BaseModel):
     @model_validator(mode="after")
     def require_results(self):
         required = {
-            "full_trip": (self.flights, self.hotels),
-            "flight_only": (self.flights,),
+            "full_trip": (self.flights or self.incomplete_flights, self.hotels),
+            "flight_only": (self.flights or self.incomplete_flights,),
             "hotel_only": (self.hotels,),
             "activity_only": (self.activities,),
             "airport_comparison": (self.airport_alternatives,),
@@ -150,21 +162,54 @@ def _stops(value):
         return 0
 
 
-def _flight(quote, trip):
+def _duration(value):
+    return value if type(value) is int and 1 <= value <= 4320 else None
+
+
+def _airport(value):
+    return value if isinstance(value, str) and re.fullmatch(r"[A-Z]{3}", value) else None
+
+
+def _leg(quote):
+    connections = quote.get("connections")
+    return {
+        "airline": clean_text(quote.get("airline")),
+        "departure_time": clean_text(quote.get("departure_time")),
+        "arrival_time": clean_text(quote.get("arrival_time")),
+        "stops": _stops(quote.get("stops")),
+        "duration_minutes": _duration(quote.get("duration_minutes")),
+        "arrival_airport": _airport(quote.get("arrival_code")),
+        "connections": [
+            FlightConnection(airport=code, duration_minutes=_duration(item.get("duration_minutes")))
+            for item in connections[:10]
+            if isinstance(item, dict) and (code := _airport(item.get("airport")))
+        ] if isinstance(connections, list) else [],
+    }
+
+
+def split_flight_quotes(quotes, trip):
+    if trip.is_one_way:
+        return list(quotes), []
+    complete, incomplete = [], []
+    for quote in quotes:
+        returned = quote.get("return_flight")
+        target = complete if (isinstance(returned, dict)
+                              and returned.get("departure_time")
+                              and returned.get("arrival_time")
+                              and quote_total(quote, "flight", trip) is not None) else incomplete
+        target.append(quote)
+    return complete, incomplete
+
+
+def _flight(quote, trip, *, incomplete=False):
     returned = quote.get("return_flight")
+    total = None if incomplete else quote_total(quote, "flight", trip)
     return FlightCard(
+        **_leg(quote),
         id=quote_facts(quote, "flight", trip).id,
-        airline=clean_text(quote.get("airline")),
-        total_usd=float(total) if (total := quote_total(quote, "flight", trip)) is not None else None,
-        departure_time=clean_text(quote.get("departure_time")),
-        arrival_time=clean_text(quote.get("arrival_time")),
-        stops=_stops(quote.get("stops")),
-        return_flight=ReturnFlightCard(
-            airline=clean_text(returned.get("airline")),
-            departure_time=clean_text(returned.get("departure_time")),
-            arrival_time=clean_text(returned.get("arrival_time")),
-            stops=_stops(returned.get("stops")),
-        ) if isinstance(returned, dict) else None,
+        total_usd=float(total) if total is not None else None,
+        price_scope=quote.get("price_scope") if quote.get("price_scope") in ("requested_party", "per_traveler") else None,
+        return_flight=ReturnFlightCard(**_leg(returned)) if isinstance(returned, dict) else None,
     )
 
 
@@ -231,6 +276,23 @@ def _activity(quote):
     )
 
 
+def _route_display(trip):
+    return {
+        "origin_airport": trip.origin if re.fullmatch(r"[A-Z]{3}", trip.origin or "") else None,
+        "destination_airport": trip.destination if re.fullmatch(r"[A-Z]{3}", trip.destination or "") else None,
+        "origin_city": _optional_text(trip.origin_city, 160),
+        "destination_city": _optional_text(trip.destination_city, 160),
+    }
+
+
+def _departure_period_legs(trip):
+    timing = getattr(trip, "flight_timing", None)
+    if not timing:
+        return []
+    return [leg for leg in ("outbound", "return")
+            if timing.compare_departures == leg or getattr(timing, f"{leg}_departure")]
+
+
 def travel_result(kind, trip: TravelSearchArgs, *, flights=(), hotels=(), activities=(),
                   hotel_checkout_date=None, hotel_check_in_date=None,
                   hotel_check_out_date=None, notice="", combine_quotes=True):
@@ -239,12 +301,13 @@ def travel_result(kind, trip: TravelSearchArgs, *, flights=(), hotels=(), activi
     hotel_counts = getattr(trip, "hotel_result_count", None)
     activity_counts = getattr(trip, "activity_result_count", None)
     flight_pool, hotel_pool, activity_pool = list(flights), list(hotels), list(activities)
+    comparison_pool, incomplete_flights = split_flight_quotes(flight_pool, trip)
     if kind == "full_trip" and combine_quotes:
-        selected_flights, flight_notice = flight_pool[:1], ""
+        selected_flights, flight_notice = comparison_pool[:1], ""
         selected_hotels, hotel_notice = hotel_pool[:1], ""
     else:
-        selected_flights, flight_notice = (select_for_presentation(flight_pool, flight_counts)
-                                           if kind in ("flight_only", "full_trip") else ([], ""))
+        selected_flights, flight_notice = (select_for_presentation(comparison_pool, flight_counts)
+                                           if comparison_pool and kind in ("flight_only", "full_trip") else ([], ""))
         selected_hotels, hotel_notice = (select_for_presentation(hotel_pool, hotel_counts)
                                          if kind in ("hotel_only", "full_trip") else ([], ""))
     selected_activities, activity_notice = (select_for_presentation(activity_pool, activity_counts)
@@ -258,26 +321,31 @@ def travel_result(kind, trip: TravelSearchArgs, *, flights=(), hotels=(), activi
     hotel_cards = [_hotel(q, trip, check_in, check_out) for q in selected_hotels]
     activity_cards = [_activity(q) for q in selected_activities]
     total = None
-    if (kind == "full_trip" and combine_quotes and flight_cards[0].total_usd is not None
+    if (kind == "full_trip" and combine_quotes and flight_cards and comparison_pool[0] is flight_pool[0]
+            and flight_cards[0].total_usd is not None
             and hotel_cards[0].total_usd is not None):
         total = float(money(flight_cards[0].total_usd + hotel_cards[0].total_usd))
     notices = [clean_text(item) for item in (
-        PARTIAL_RETURN_NOTICE if any(quote.get("return_lookup_incomplete") for quote in flight_pool) else "",
+        PARTIAL_RETURN_NOTICE if flight_cards and any(quote.get("return_lookup_incomplete") for quote in flight_pool) else "",
         notice,
         "Separate quotes; no compatible pairing was confirmed." if kind == "full_trip" and not combine_quotes else "",
         flight_notice, hotel_notice, activity_notice,
     ) if item]
     return TravelResult(
         kind=kind, searched_at=datetime.now(timezone.utc),
+        **_route_display(trip),
         origin=clean_text(trip.origin) if trip.origin else "",
         destination=clean_text(trip.location or trip.destination_city or trip.destination)
         if (trip.location or trip.destination_city or trip.destination) else "",
         start_date=trip.start_date or "", end_date=trip.end_date or check_out or "",
         hotel_check_in_date=check_in, hotel_check_out_date=check_out,
         flight_result_count=flight_counts, hotel_result_count=hotel_counts,
+        departure_period_legs=_departure_period_legs(trip),
         activity_result_count=activity_counts,
         adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
         flights=flight_cards, hotels=hotel_cards, activities=activity_cards,
+        incomplete_flights=[_flight(q, trip, incomplete=True) for q in incomplete_flights[:5]],
+        incomplete_flight_count=len(incomplete_flights),
         total_usd=total, notice=" ".join(notices)[:240],
     ).model_dump(mode="json")
 
@@ -306,10 +374,12 @@ def airport_comparison_result(trip: TravelSearchArgs, target, quoted):
               "and excluded, so lower airfare may not mean a cheaper journey.")
     return TravelResult(
         kind="airport_comparison", searched_at=datetime.now(timezone.utc),
+        **_route_display(trip),
         origin=clean_text(trip.origin), destination=clean_text(trip.destination_city or target.municipality or target.code),
         start_date=trip.start_date or "", end_date=trip.end_date or "",
         adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
         requested_airport=target.code, requested_fare_usd=baseline,
+        departure_period_legs=_departure_period_legs(trip),
         airport_alternatives=alternatives, notice=notice,
     ).model_dump(mode="json")
 
@@ -337,8 +407,10 @@ def date_comparison_result(trip: TravelSearchArgs, quoted):
         notice = PARTIAL_RETURN_NOTICE + " " + notice
     return TravelResult(
         kind="date_comparison", searched_at=datetime.now(timezone.utc),
+        **_route_display(trip),
         origin=clean_text(trip.origin), destination=clean_text(trip.destination_city or trip.destination),
         start_date=trip.start_date or "", end_date=trip.end_date or "",
         adults=trip.adults, children=trip.children, rooms=trip.rooms, is_one_way=trip.is_one_way,
         base_fare_usd=baseline, date_alternatives=alternatives, notice=notice[:240],
+        departure_period_legs=_departure_period_legs(trip),
     ).model_dump(mode="json")
