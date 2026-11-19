@@ -123,9 +123,19 @@ test("saved fares stay with their trip through later searches and reload", async
   await expect(page.getByText("Incomplete Air")).toBeVisible()
   await expect(option).toHaveCount(1)
   await option.click()
-  await expect(
-    page.getByRole("button", { name: "Saved", exact: true }),
-  ).toBeDisabled()
+  const unsave = page.getByRole("button", {
+    name: "Unsave option",
+    exact: true,
+  })
+  await expect(unsave).toBeEnabled()
+  await page.reload()
+  await trip.click()
+  await unsave.press("Enter")
+  await expect(entry).toHaveCount(0)
+  await page.reload()
+  await trip.click()
+  await expect(unsave).toHaveCount(0)
+  await option.click()
   await expect(entry).toBeVisible()
 
   await trips.getByRole("button", { name: "Other trip", exact: true }).click()
