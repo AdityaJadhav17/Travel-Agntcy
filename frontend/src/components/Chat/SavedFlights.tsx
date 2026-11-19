@@ -156,9 +156,9 @@ export function SaveFlightButton({
   return (
     <button
       type="button"
-      aria-disabled={isSaved}
       onClick={() => {
-        if (!isSaved) saved.save(snapshot)
+        if (isSaved) saved.remove(snapshot.id)
+        else saved.save(snapshot)
       }}
       className={actionClasses}
     >
@@ -166,7 +166,7 @@ export function SaveFlightButton({
         aria-hidden="true"
         className={isSaved ? "size-4 fill-current" : "size-4"}
       />
-      {isSaved ? "Saved" : "Save option"}
+      {isSaved ? "Unsave option" : "Save option"}
     </button>
   )
 }
