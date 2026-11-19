@@ -11,6 +11,7 @@ from agents.supervisors.travel.graph.graph import TravelGraph
 from agents.supervisors.travel.graph.models import TravelSearchArgs
 from agents.supervisors.travel.graph.recommendations import quote_facts
 from agents.supervisors.travel.graph.travel_results import TravelResult, travel_result
+from agents.travel.serpapi_tools import _parse_flight, _parse_return_flight
 
 
 def trip(**changes):
@@ -23,9 +24,9 @@ def trip(**changes):
 
 
 def test_full_trip_cards_use_quote_prices_and_bounded_provider_labels():
-    params = trip(adults=2, children=1, children_ages=[8])
+    params = trip(origin_city="Dallas", adults=2, children=1, children_ages=[8])
     flight = {
-        "airline": "<Fixture Air>", "price": 240, "currency": "USD",
+        "airline": "<Fixture Air>", "price": 240, "currency": "USD", "price_scope": "requested_party",
         "departure_time": f"{params.start_date} 10:00", "arrival_time": f"{params.start_date} 13:00",
         "return_flight": {"airline": "Fixture Air", "departure_time": f"{params.end_date} 10:00",
                           "arrival_time": f"{params.end_date} 13:00", "stops": 0},
@@ -37,12 +38,40 @@ def test_full_trip_cards_use_quote_prices_and_bounded_provider_labels():
     assert data["version"] == 1
     assert data["kind"] == "full_trip"
     assert data["total_usd"] == 540
+    assert (data["origin_airport"], data["destination_airport"]) == ("DFW", "JFK")
+    assert (data["origin_city"], data["destination_city"]) == ("Dallas", "New York")
+    assert data["flights"][0]["price_scope"] == "requested_party"
     assert data["flights"][0]["airline"] == "Fixture Air"
     assert data["flights"][0]["return_flight"]["airline"] == "Fixture Air"
     assert data["hotels"][0]["total_usd"] == 300
     assert data["activities"][0]["name"] == "City Museum"
     assert data["adults"] == 2 and data["children"] == 1
     assert TravelResult.model_validate(data).model_dump(mode="json") == data
+
+
+def test_flight_cards_preserve_only_reported_total_and_connection_minutes():
+    params = trip(search_type="flight_only")
+    def group(origin, stop, destination, day, total, layover):
+        return {
+            "price": 240, "total_duration": total,
+            "layovers": [{"id": stop, "duration": layover}],
+            "flights": [
+                {"airline": "Fixture Air", "departure_airport": {"id": origin, "time": f"{day} 08:00"},
+                 "arrival_airport": {"id": stop, "time": f"{day} 10:00"}},
+                {"airline": "Fixture Air", "departure_airport": {"id": stop, "time": f"{day} 11:00"},
+                 "arrival_airport": {"id": destination, "time": f"{day} 13:00"}},
+            ],
+        }
+
+    quote = _parse_flight(group("DFW", "ATL", "JFK", params.start_date, 280, 60))
+    quote["return_flight"] = _parse_return_flight(
+        group("JFK", "ORD", "DFW", params.end_date, None, "unknown"))
+    card = travel_result("flight_only", params, flights=[quote])["flights"][0]
+    assert card["duration_minutes"] == 280
+    assert card["arrival_airport"] == "JFK"
+    assert card["connections"] == [{"airport": "ATL", "duration_minutes": 60}]
+    assert card["return_flight"]["duration_minutes"] is None
+    assert card["return_flight"]["connections"] == [{"airport": "ORD", "duration_minutes": None}]
 
 
 def test_missing_or_foreign_prices_are_unknown_not_zero_or_usd():
@@ -130,7 +159,9 @@ def test_unpaired_full_trip_keeps_separate_quotes_without_a_combined_total():
     params = trip()
     flights = [
         {"airline": f"Fixture Air {index}", "price": 200 + index, "currency": "USD",
-         "departure_time": f"{params.start_date} 10:00", "arrival_time": f"{params.start_date} 13:00"}
+         "departure_time": f"{params.start_date} 10:00", "arrival_time": f"{params.start_date} 13:00",
+         "return_flight": {"departure_time": f"{params.end_date} 13:00",
+                           "arrival_time": f"{params.end_date} 16:00"}}
         for index in range(2)
     ]
     hotels = [
@@ -157,10 +188,33 @@ def test_search_result_is_attached_to_graph_success_only(monkeypatch):
     params = trip(search_type="flight_only")
     search = AsyncMock(return_value=[{"airline": "Fixture Air", "price": 240,
                                       "currency": "USD", "departure_time": f"{params.start_date} 10:00",
-                                      "arrival_time": f"{params.start_date} 13:00"}])
+                                      "arrival_time": f"{params.start_date} 13:00",
+                                      "return_flight": {"departure_time": f"{params.end_date} 10:00",
+                                                        "arrival_time": f"{params.end_date} 13:00"}}])
     monkeypatch.setattr("agents.supervisors.travel.graph.graph.get_flights_via_a2a", search)
     result = asyncio.run(TravelGraph()._handle_flight_only_search(params))
     assert result["travel_result"]["flights"][0]["total_usd"] == 240
     search.return_value = []
     missing = asyncio.run(TravelGraph()._handle_flight_only_search(params))
     assert "travel_result" not in missing
+
+
+def test_all_incomplete_round_trips_preserve_disclosure_without_promoting_outbound_fares(monkeypatch):
+    params = trip(search_type="flight_only", budget_amount=300)
+    quotes = [
+        {"airline": "Fixture Air", "price": 30, "currency": "USD",
+         "departure_time": f"{params.start_date} 0{index}:00",
+         "arrival_time": f"{params.start_date} 10:00"}
+        for index in range(6)
+    ]
+    monkeypatch.setattr("agents.supervisors.travel.graph.graph.get_flights_via_a2a",
+                        AsyncMock(return_value=quotes))
+    result = asyncio.run(TravelGraph()._handle_flight_only_search(params))
+    cards = result["travel_result"]
+    assert cards["flights"] == []
+    assert cards["incomplete_flight_count"] == 6
+    assert len(cards["incomplete_flights"]) == 5
+    assert all(flight["total_usd"] is None for flight in cards["incomplete_flights"])
+    assert result["budget_assessment"]["status"] == "unknown"
+    assert "$30" not in result["full_response"]
+    assert "Incomplete round-trip quotes: 6" in result["full_response"]

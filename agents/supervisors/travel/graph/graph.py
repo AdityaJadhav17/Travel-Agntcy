@@ -44,6 +44,7 @@ from agents.supervisors.travel.graph.budgets import budget_question, quote_total
 from agents.supervisors.travel.graph.recommendations import FlightRecommendation, Recommendation, capture_recommendation, capture_flight_recommendation, explain_recommendation, quote_facts
 from agents.supervisors.travel.graph.travel_results import (
     PARTIAL_RETURN_NOTICE, travel_result, airport_comparison_result, date_comparison_result,
+    split_flight_quotes,
 )
 from agents.supervisors.travel.graph.presentation_selection import select_for_presentation, explicit_requested_count
 from agents.supervisors.travel.graph.nearby_airports import airport_catalog, nearby_arrivals, NearbyAirport
@@ -735,18 +736,17 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                 )
 
         response = self._format_travel_plan(plan, params, [], hotel_check_out)
-        price_note = ("I refreshed the same flight itinerary at the provider's current quoted price. "
-                      if refreshed else "I kept the selected flight quote from the last five minutes. ")
-        response = (
-            f"I kept your selected flight and found a different hotel. {price_note}"
-            "I searched hotels again for the same dates and travelers. Activities were not refreshed.\n\n"
-            + response + "\n\n" + params.label("full_trip")
+        price_note = ("The fare was checked again." if refreshed
+                      else "The fare was checked within the last five minutes.")
+        replacement_notice = (
+            f"Same flight, different hotel for your dates and travelers. {price_note} Activities were not refreshed."
         )
+        response = replacement_notice + "\n\n" + response + "\n\n" + params.label("full_trip")
         return {**self._quoted_response(response, summary),
                 "recommendation": capture_recommendation(plan, params),
                 "travel_result": travel_result("full_trip", params, flights=[plan["flight"]],
                                                hotels=[plan["hotel"]],
-                                               notice="Selected flight retained; replacement hotels refreshed.")}
+                                               notice=replacement_notice)}
 
     @staticmethod
     def _partial_full_trip_response(params, flights, checkout, reason, attempts=0):
@@ -760,12 +760,12 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             problem = "The hotel results contradicted your accommodation requirements."
         else:
             problem = "The hotel search returned no options for these dates."
-        retry = (" Select Retry hotels to check hotels again without repeating the flight search."
-                 if saved else " Please start a new search when you're ready to try again.")
-        response = (f"I found {len(flights)} flight option{'s' if len(flights) != 1 else ''}. "
-                    + problem + " No flight + hotel total is verified." + retry)
+        retry = (" Retry hotels to keep these flights."
+                 if saved else " Start a new search to try again.")
+        notice = problem + " No flight + hotel total is verified." + retry
+        response = f"I found {len(flights)} flight option{'s' if len(flights) != 1 else ''}. " + notice
         return {**TravelGraph._quoted_response(response),
-                "travel_result": travel_result("flight_only", params, flights=flights),
+                "travel_result": travel_result("flight_only", params, flights=flights, notice=notice),
                 "recommendation": capture_flight_recommendation(
                     select_for_presentation(flights, params.flight_result_count, limit=5)[0], params),
                 "partial_search": saved, "retry_hotels": saved is not None}
@@ -1326,14 +1326,15 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                     "I couldn't verify a matching return with the same outbound. Try another return window or date.")
             if not flights and timing:
                 return self._flight_timing_no_matches(params)
+            flights, incomplete_flights = split_flight_quotes(flights, params)
             summary = None
             if params.budget_amount is not None:
                 flights, summary = filter_quotes(flights, "flight", params)
-                if not flights:
+                if not flights and not incomplete_flights:
                     return self._quoted_response("Try different dates or revise your quoted-cost budget.", summary)
-            if not flights:
+            if not flights and not incomplete_flights:
                 return {"messages": [AIMessage(content=f"I couldn't find any flights from {params.origin} to {params.destination} for {params.start_date}. Please try different dates.")]}
-            if flexible:
+            if flexible and flights:
                 flights = timing.prefer_matching_flights(flights)
             
             selected_flights, _ = select_for_presentation(flights, params.flight_result_count, limit=5)
@@ -1343,11 +1344,17 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
             if comparison_for_trip:
                 notice = "Flight fares only. Hotel prices are separate. " + notice
             response = self._format_flights_only(flights, params)
+            if incomplete_flights:
+                count = len(incomplete_flights)
+                response += (
+                    f"\n\nIncomplete round-trip quotes: {count}. "
+                    "These options are missing return details or a round-trip fare."
+                )
             if any(flight.get("return_lookup_incomplete") for flight in selected_flights):
                 response += "\n\n" + PARTIAL_RETURN_NOTICE
             if notice:
                 response += "\n\n" + notice
-            cards = travel_result("flight_only", params, flights=flights, notice=notice)
+            cards = travel_result("flight_only", params, flights=[*flights, *incomplete_flights], notice=notice)
             emit("result", component="flights", travel_result=cards)
             return {**self._quoted_response(response, summary),
                     "travel_result": cards,
@@ -1571,7 +1578,7 @@ Respond with ONLY 'travel_search', 'change_hotel', 'explain_recommendation' or '
                                 "What hotel check-in and check-out dates should I use? I haven't searched hotels yet.")
                     return {"messages": [AIMessage(content=response)], "full_response": response,
                             "search_params": params.model_dump(),
-                            "travel_result": travel_result("flight_only", params, flights=flights),
+                            "travel_result": travel_result("flight_only", params, flights=flights, notice=response),
                             "recommendation": capture_flight_recommendation(
                                 select_for_presentation(flights, params.flight_result_count, limit=5)[0], params)}
 
@@ -2229,6 +2236,8 @@ Would you like me to also find flights to {location}?"""
 
         selected_flights, selection_notice = select_for_presentation(
             flights, params.flight_result_count, limit=5)
+        if not selected_flights:
+            return response + "No complete round-trip quotes are available."
         response += f"Here are the top {len(selected_flights)} flight options:\n\n"
         
         # Show only top 5 flights with card-style format

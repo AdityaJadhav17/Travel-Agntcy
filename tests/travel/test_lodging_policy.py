@@ -23,7 +23,7 @@ def test_timing_unknown_missing_and_invalid_evidence():
     result = assess_timing(base_flight, hotel)
     assert result["timing_status"] == "needs_confirmation"
     assert result["timing_reason_codes"] == ["prior_night_booking_or_late_arrival_needs_confirmation"]
-    assert "reservation retention" in result["timing_message"]
+    assert "whether it will hold your room" in result["timing_message"]
     assert assess_timing({"arrival_time": "bad\u00a0time"}, hotel)["timing_status"] == "needs_confirmation"
     assert assess_timing({"arrival_time": "2026-12-10 19:00"}, {**hotel, "check_in_time": "3:00\u202fPM"})["timing_status"] == "compatible"
     assert assess_timing({"arrival_time": "2026-12-10 10:00"}, {**hotel, "check_in_time": None})["timing_status"] == "needs_confirmation"

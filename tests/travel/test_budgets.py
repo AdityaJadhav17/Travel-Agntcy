@@ -78,7 +78,7 @@ def test_incomplete_hotel_stay_cannot_be_estimated():
 
 @pytest.mark.parametrize('kind,handler', [('flight', '_handle_flight_only_search'), ('hotel', '_handle_hotel_only_search')])
 def test_only_affordable_options_reach_renderer(monkeypatch, kind, handler):
-    trip = params(search_type=f'{kind}_only', budget_amount=300)
+    trip = params(search_type=f'{kind}_only', budget_amount=300, is_one_way=kind == "flight")
     quotes = [{"name": "Affordable", "airline": "Affordable", "price": 100, "currency": "USD"}, {"name": "Expensive", "airline": "Expensive", "price": 900, "currency": "USD"}]
     monkeypatch.setattr(f'agents.supervisors.travel.graph.graph.get_{kind}s_via_a2a', AsyncMock(return_value=quotes))
     result = asyncio.run(getattr(TravelGraph(), handler)(trip))

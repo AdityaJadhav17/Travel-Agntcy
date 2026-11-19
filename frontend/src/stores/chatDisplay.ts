@@ -134,12 +134,17 @@ export function chatDisplayReducer(
       case "outbound_preview":
         // Undefined means a snapshot can still arrive. Null closes the preview.
         if (view.outboundPreview !== undefined) return state
-        views.set(chatId, { ...view, outboundPreview: event.flights })
+        views.set(chatId, {
+          ...view,
+          status: "Checking return flights",
+          outboundPreview: event.flights,
+        })
         break
       case "verified_flight_preview":
         if (view.verifiedFlightPreview !== undefined) return state
         views.set(chatId, {
           ...view,
+          status: "Checking more fares",
           outboundPreview: null,
           verifiedFlightPreview: event.flight,
         })

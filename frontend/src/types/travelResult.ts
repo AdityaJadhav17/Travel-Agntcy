@@ -1,16 +1,18 @@
-export interface FlightCard {
-  id: string
+export interface FlightLeg {
   airline: string
-  total_usd: number | null
   departure_time: string
   arrival_time: string
   stops: number
-  return_flight: {
-    airline: string
-    departure_time: string
-    arrival_time: string
-    stops: number
-  } | null
+  duration_minutes?: number | null
+  arrival_airport?: string | null
+  connections?: { airport: string; duration_minutes?: number | null }[]
+}
+
+export interface FlightCard extends FlightLeg {
+  id: string
+  total_usd: number | null
+  price_scope?: "requested_party" | "per_traveler" | null
+  return_flight: FlightLeg | null
 }
 
 export interface HotelCard {
@@ -78,6 +80,10 @@ export interface TravelResult {
   searched_at: string
   origin: string
   destination: string
+  origin_airport?: string | null
+  destination_airport?: string | null
+  origin_city?: string | null
+  destination_city?: string | null
   start_date: string
   end_date: string
   hotel_check_in_date?: string | null
@@ -85,11 +91,14 @@ export interface TravelResult {
   flight_result_count?: number | null
   hotel_result_count?: number | null
   activity_result_count?: number | null
+  departure_period_legs?: ("outbound" | "return")[]
   adults: number
   children: number
   rooms: number
   is_one_way: boolean
   flights: FlightCard[]
+  incomplete_flights?: FlightCard[]
+  incomplete_flight_count?: number
   hotels: HotelCard[]
   activities: ActivityCard[]
   requested_airport?: string
@@ -128,22 +137,40 @@ const rating = (value: unknown): value is number | null =>
     value >= 0 &&
     value <= 5)
 
+const duration = (value: unknown) =>
+  value == null || (count(value) && value > 0 && value <= 4320)
+
+const airportCode = (value: unknown) => text(value) && /^[A-Z]{3}$/.test(value)
+
+export const isFlightLeg = (value: unknown): value is FlightLeg =>
+  record(value) &&
+  text(value.airline) &&
+  text(value.departure_time) &&
+  text(value.arrival_time) &&
+  count(value.stops) &&
+  duration(value.duration_minutes) &&
+  (value.arrival_airport == null || airportCode(value.arrival_airport)) &&
+  (value.connections === undefined ||
+    (Array.isArray(value.connections) &&
+      value.connections.length <= 10 &&
+      value.connections.every(
+        (item) =>
+          record(item) &&
+          airportCode(item.airport) &&
+          duration(item.duration_minutes),
+      )))
+
 const flight = (value: unknown): value is FlightCard => {
   if (!record(value)) return false
   const returned = value.return_flight
   return (
     text(value.id) &&
-    text(value.airline) &&
+    isFlightLeg(value) &&
     price(value.total_usd) &&
-    text(value.departure_time) &&
-    text(value.arrival_time) &&
-    count(value.stops) &&
-    (returned === null ||
-      (record(returned) &&
-        text(returned.airline) &&
-        text(returned.departure_time) &&
-        text(returned.arrival_time) &&
-        count(returned.stops)))
+    (value.price_scope == null ||
+      value.price_scope === "requested_party" ||
+      value.price_scope === "per_traveler") &&
+    (returned === null || isFlightLeg(returned))
   )
 }
 
@@ -273,6 +300,12 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     !text(value.searched_at) ||
     !text(value.origin) ||
     !text(value.destination) ||
+    ![value.origin_airport, value.destination_airport].every(
+      (code) => code == null || (text(code) && /^[A-Z]{3}$/.test(code)),
+    ) ||
+    ![value.origin_city, value.destination_city].every(
+      (city) => city == null || text(city),
+    ) ||
     !text(value.start_date) ||
     !text(value.end_date) ||
     !count(value.adults) ||
@@ -286,6 +319,12 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     !requestedCount(value.flight_result_count) ||
     !requestedCount(value.hotel_result_count) ||
     !requestedCount(value.activity_result_count) ||
+    (value.departure_period_legs !== undefined &&
+      (!Array.isArray(value.departure_period_legs) ||
+        value.departure_period_legs.length > 2 ||
+        !value.departure_period_legs.every(
+          (leg) => leg === "outbound" || leg === "return",
+        ))) ||
     !(
       value.hotel_check_in_date === undefined ||
       value.hotel_check_in_date === null ||
@@ -304,6 +343,16 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     !Array.isArray(value.flights) ||
     value.flights.length > 5 ||
     !value.flights.every(flight) ||
+    (value.incomplete_flights !== undefined &&
+      (!Array.isArray(value.incomplete_flights) ||
+        value.incomplete_flights.length > 5 ||
+        !value.incomplete_flights.every(flight))) ||
+    (value.incomplete_flight_count !== undefined &&
+      (!count(value.incomplete_flight_count) ||
+        value.incomplete_flight_count <
+          (Array.isArray(value.incomplete_flights)
+            ? value.incomplete_flights.length
+            : 0))) ||
     !Array.isArray(value.hotels) ||
     value.hotels.length > 5 ||
     !value.hotels.every(hotel) ||
@@ -312,10 +361,12 @@ export function parseTravelResult(value: unknown): TravelResult | null {
     !value.activities.every(activity)
   )
     return null
+  const hasFlights =
+    value.flights.length ||
+    (Array.isArray(value.incomplete_flights) && value.incomplete_flights.length)
   if (
-    (value.kind === "full_trip" &&
-      (!value.flights.length || !value.hotels.length)) ||
-    (value.kind === "flight_only" && !value.flights.length) ||
+    (value.kind === "full_trip" && (!hasFlights || !value.hotels.length)) ||
+    (value.kind === "flight_only" && !hasFlights) ||
     (value.kind === "hotel_only" && !value.hotels.length) ||
     (value.kind === "activity_only" && !value.activities.length)
   )

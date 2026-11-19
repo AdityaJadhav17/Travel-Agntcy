@@ -1,0 +1,57 @@
+.travel-composer {
+  background: var(--travel-surface);
+  border-color: var(--travel-control);
+}
+
+.travel-composer:focus-within {
+  border-color: var(--travel-accent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--travel-accent) 24%, transparent);
+}
+
+.travel-composer textarea {
+  field-sizing: content;
+  min-height: 56px;
+  max-height: min(8rem, 32dvh);
+}
+
+.travel-composer-action {
+  background: var(--travel-accent);
+  color: var(--travel-on-accent);
+}
+
+.travel-composer-action:hover:not(:disabled) {
+  background: var(--travel-accent-hover);
+}
+
+.travel-composer-action:disabled {
+  background: var(--travel-raised);
+  color: var(--travel-muted);
+}
+
+@media (prefers-reduced-motion: no-preference) and (forced-colors: none) {
+  @supports (background-clip: text) {
+    .travel-progress {
+      background-image: linear-gradient(
+        90deg,
+        var(--travel-muted) 44%,
+        color-mix(in srgb, var(--travel-muted), white 14%) 50%,
+        var(--travel-muted) 56%
+      );
+      background-size: 260% 100%;
+      background-clip: text;
+      color: transparent;
+      animation: travel-progress-sweep 2s ease-in-out infinite;
+    }
+  }
+}
+
+@keyframes travel-progress-sweep {
+  from {
+    background-position: 100% 50%;
+  }
+
+  to {
+    background-position: 0% 50%;
+  }
+}

@@ -3,14 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useState, useRef, useEffect } from "react"
+import React, { useId, useState, useRef, useLayoutEffect } from "react"
 import { Message } from "@/types/message"
+import type { TripContext } from "@/types/tripContext"
 import { ArrowUp, Square } from "lucide-react"
 import CoffeePromptsDropdown from "./Prompts/CoffeePromptsDropdown"
+import TripSummary from "./TripSummary"
 import { useAgentAPI } from "@/hooks/useAgentAPI"
 
 import { logger } from "@/utils/logger"
 import axios from "axios"
+import "./ChatComposer.css"
 
 interface ApiResponse {
   response: string
@@ -18,12 +21,18 @@ interface ApiResponse {
 }
 
 interface ChatAreaProps {
+  content: string
+  setContent: (draft: string) => void
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>
   setButtonClicked: (clicked: boolean) => void
   setAiReplied: (replied: boolean) => void
   isBottomLayout: boolean
   showCoffeePrompts?: boolean
   showTravelStarters?: boolean
+  trip?: TripContext | null
+  tripEditorKey?: string
+  showTripDetails?: boolean
+  onTripSearch?: (prompt: string) => void
   showLogisticsPrompts?: boolean
   showProgressTracker?: boolean
   showAuctionStreaming?: boolean
@@ -48,21 +57,51 @@ interface ChatAreaProps {
 }
 
 const starters = [
-  { label: "Find flights", draft: "Find flights from " },
-  { label: "Find a hotel", draft: "Find a hotel in " },
+  {
+    label: "Find flights",
+    draft:
+      "Find a weekend flight from Dallas to San Francisco for three adults.",
+  },
+  {
+    label: "Find a hotel",
+    draft: "Find a hotel in Boston for two adults next weekend.",
+  },
   {
     label: "Flights + hotel",
-    draft: "Find flights and a hotel only. I'm leaving from ",
+    draft:
+      "Find flights and a hotel for two adults from Seattle to Chicago next weekend.",
   },
 ]
 
+function composerPlaceholder(trip: TripContext | null | undefined) {
+  switch (trip?.search_type) {
+    case "flight_only":
+    case "full_trip":
+      return "Arrive before noon"
+    case "hotel_only":
+      return "Stay near the city center"
+    case "activity_only":
+      return "Find outdoor activities"
+    default:
+      return trip
+        ? "Ask about these results or change your trip"
+        : "Enter a route, destination, or travel dates"
+  }
+}
+
 const ChatArea: React.FC<ChatAreaProps> = ({
+  content,
+  setContent,
   setMessages,
   setButtonClicked,
   setAiReplied,
   isBottomLayout,
   showCoffeePrompts = false,
   showTravelStarters = false,
+  trip,
+  tripEditorKey,
+  showTripDetails = true,
+  onTripSearch,
   showProgressTracker = false,
   showAuctionStreaming = false,
   pattern,
@@ -73,26 +112,19 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   onStop,
   chatRef,
 }) => {
-  const [content, setContent] = useState<string>("")
   const [loading, setLoading] = useState<boolean>(false)
-  const [isMinimized, setIsMinimized] = useState<boolean>(false)
+  const inputId = useId()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const { sendMessageWithCallback } = useAgentAPI()
 
-  // Auto-resize textarea
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto"
-      textareaRef.current.style.height =
-        Math.min(textareaRef.current.scrollHeight, 200) + "px"
-    }
+  useLayoutEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea || CSS.supports("field-sizing", "content")) return
+    textarea.style.height = "0"
+    textarea.style.height = `${textarea.scrollHeight}px`
   }, [content])
 
   const handleDropdownQuery = (query: string) => {
-    if (isMinimized) {
-      setIsMinimized(false)
-    }
-
     if (onDropdownSelect) {
       onDropdownSelect(query)
     }
@@ -137,10 +169,6 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   const processMessage = async (): Promise<void> => {
     if (!content.trim()) return
 
-    if (isMinimized) {
-      setIsMinimized(false)
-    }
-
     if (onUserInput) {
       const messageContent = content
       if (onUserInput(messageContent) !== false) setContent("")
@@ -167,15 +195,24 @@ const ChatArea: React.FC<ChatAreaProps> = ({
   }
 
   const isDisabled = loading || isAgentLoading
+  const canSend = Boolean(content.trim()) && !isDisabled
   const canApplyStarter =
     !isDisabled &&
     (!content.trim() || starters.some(({ draft }) => content === draft))
+  const label = (
+    <label htmlFor={inputId} className="text-sm font-medium text-travel-text">
+      {trip ? "Refine this trip" : "Where would you like to go?"}
+    </label>
+  )
 
   return (
-    <div ref={chatRef} className="relative flex w-full flex-col bg-[#212121]">
-      <div className="flex w-full flex-col items-center gap-3 px-4 py-4">
+    <div
+      ref={chatRef}
+      className="relative flex w-full flex-col bg-travel-canvas"
+    >
+      <div className="flex w-full flex-col items-center gap-3 py-2">
         {showCoffeePrompts && (
-          <div className="relative z-10 flex w-full max-w-[768px] justify-center">
+          <div className="relative z-10 flex w-full justify-center">
             <CoffeePromptsDropdown
               visible={true}
               onSelect={handleDropdownQuery}
@@ -184,7 +221,7 @@ const ChatArea: React.FC<ChatAreaProps> = ({
           </div>
         )}
 
-        <div className="w-full max-w-[768px]">
+        <div className="w-full">
           {showTravelStarters && (
             <div
               role="group"
@@ -200,33 +237,39 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                     setContent(draft)
                     textareaRef.current?.focus()
                   }}
-                  className="min-h-11 rounded-md border border-white/15 px-3 text-sm font-medium text-gray-200 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-emerald-300 disabled:opacity-50"
+                  className="min-h-11 rounded-md border border-travel-control px-3 text-sm font-medium text-travel-text hover:bg-travel-selected focus-visible:outline-2 focus-visible:outline-travel-accent disabled:opacity-50"
                 >
                   {label}
                 </button>
               ))}
             </div>
           )}
-          <div className="relative flex flex-col rounded-2xl border border-[#424242] bg-[#2f2f2f] shadow-lg transition-all focus-within:border-[#5a5a5a]">
-            {/* Textarea */}
+          {trip && onTripSearch ? (
+            <TripSummary
+              key={tripEditorKey}
+              trip={trip}
+              composerLabel={label}
+              showDetails={showTripDetails}
+              disabled={Boolean(isDisabled)}
+              onSearch={onTripSearch}
+            />
+          ) : (
+            <div className="mb-1.5">{label}</div>
+          )}
+          <div className="travel-composer relative flex flex-col rounded-2xl border">
             <textarea
-              aria-label="Message Travel AGNTCY"
+              id={inputId}
               ref={textareaRef}
-              className="max-h-[200px] min-h-[52px] w-full resize-none bg-transparent px-4 py-3.5 pr-16 text-[15px] leading-6 text-gray-100 outline-hidden placeholder:text-gray-500"
-              placeholder={
-                showTravelStarters
-                  ? "Enter a route, destination, or travel dates"
-                  : "Add details or ask about these results"
-              }
+              className="w-full resize-none bg-transparent px-4 py-4 pr-16 text-base leading-6 text-travel-text outline-hidden placeholder:text-travel-muted"
+              placeholder={composerPlaceholder(trip)}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               onKeyDown={handleKeyDown}
-              disabled={isDisabled}
+              disabled={isDisabled && !onStop}
               rows={1}
             />
 
-            {/* Send button */}
-            <div className="absolute right-1 bottom-1">
+            <div className="absolute right-1.5 bottom-1.5">
               <button
                 type="button"
                 aria-label={onStop ? "Stop" : "Send message"}
@@ -234,16 +277,12 @@ const ChatArea: React.FC<ChatAreaProps> = ({
                 onClick={() => {
                   if (onStop) {
                     onStop()
-                  } else if (content.trim() && !isDisabled) {
-                    processMessage()
+                  } else if (canSend) {
+                    void processMessage()
                   }
                 }}
-                disabled={!onStop && (!content.trim() || isDisabled)}
-                className={`flex size-11 items-center justify-center rounded-lg transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-300 motion-reduce:transition-none ${
-                  onStop || (content.trim() && !isDisabled)
-                    ? "bg-white text-black hover:bg-gray-200"
-                    : "cursor-not-allowed bg-[#424242] text-gray-500"
-                }`}
+                disabled={!onStop && !canSend}
+                className="travel-composer-action flex size-11 items-center justify-center rounded-xl transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-travel-accent motion-reduce:transition-none"
               >
                 {onStop ? (
                   <Square

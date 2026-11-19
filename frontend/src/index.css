@@ -5,6 +5,22 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --color-travel-canvas: var(--travel-canvas);
+  --color-travel-surface: var(--travel-surface);
+  --color-travel-raised: var(--travel-raised);
+  --color-travel-selected: var(--travel-selected);
+  --color-travel-text: var(--travel-text);
+  --color-travel-muted: var(--travel-muted);
+  --color-travel-accent: var(--travel-accent);
+  --color-travel-accent-hover: var(--travel-accent-hover);
+  --color-travel-accent-soft: var(--travel-accent-soft);
+  --color-travel-on-accent: var(--travel-on-accent);
+  --color-travel-border: var(--travel-border);
+  --color-travel-control: var(--travel-control);
+  --color-travel-warning: var(--travel-warning);
+  --color-travel-warning-border: var(--travel-warning-border);
+  --color-travel-warning-soft: var(--travel-warning-soft);
+
   --color-app-background: var(--app-background);
   --color-node-background: var(--node-background);
   --color-node-data-background: var(--node-data-background);
@@ -171,6 +187,16 @@
   .theme-switching * {
     transition: none !important;
     animation-duration: 0s !important;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    @media not (any-pointer: coarse) {
+      .trip-row:not(:hover, :focus-within)
+        .trip-row-actions:not(:has([aria-expanded="true"])) {
+        opacity: 0;
+        pointer-events: none;
+      }
+    }
   }
 }
 
@@ -478,6 +504,69 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
+  }
+
+  .travel-ui {
+    --travel-canvas: #171717;
+    --travel-surface: #202020;
+    --travel-raised: #282828;
+    --travel-selected: #343434;
+    --travel-text: #f3f3f3;
+    --travel-muted: #bfbfbf;
+    --travel-accent: #9bcdb3;
+    --travel-accent-hover: #b3dfc6;
+    --travel-accent-soft: #283c31;
+    --travel-on-accent: #19221d;
+    --travel-border: #3c3c3c;
+    --travel-control: #777777;
+    --travel-warning: #f1cf93;
+    --travel-warning-border: #a48650;
+    --travel-warning-soft: #302817;
+
+    color: var(--travel-text);
+    color-scheme: dark;
+    accent-color: var(--travel-accent);
+    scrollbar-color: var(--travel-control) transparent;
+  }
+
+  body[data-theme="light"] .travel-ui {
+    --travel-canvas: #f7f5ef;
+    --travel-surface: #ffffff;
+    --travel-raised: #eeeee6;
+    --travel-selected: #e0e9df;
+    --travel-text: #19221d;
+    --travel-muted: #404e46;
+    --travel-accent: #245b45;
+    --travel-accent-hover: #194734;
+    --travel-accent-soft: #e3eee5;
+    --travel-on-accent: #ffffff;
+    --travel-border: #d5dad0;
+    --travel-control: #7d8a80;
+    --travel-warning: #765018;
+    --travel-warning-border: #9b753a;
+    --travel-warning-soft: #f7edda;
+
+    color-scheme: light;
+  }
+
+  .travel-ui
+    :is(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+    outline: 2px solid var(--travel-accent);
+    outline-offset: 2px;
+  }
+
+  .travel-ui :is(select, option, optgroup) {
+    color-scheme: inherit;
+  }
+
+  .travel-ui :is(input, textarea)::placeholder {
+    color: var(--travel-muted);
+    opacity: 1;
+  }
+
+  .travel-ui ::selection {
+    background-color: var(--travel-accent);
+    color: var(--travel-on-accent);
   }
 }
 

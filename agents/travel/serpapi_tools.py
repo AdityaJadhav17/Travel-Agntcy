@@ -14,6 +14,7 @@ Key functions:
 
 import logging
 import asyncio
+import re
 import math
 import weakref
 import httpx
@@ -316,10 +317,11 @@ async def search_flights(
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
-            completed = [(flight, data) for (flight, _), data in zip(candidates_with_tokens, return_options)
+            looked_up = list(zip((flight for flight, _ in candidates_with_tokens), return_options))
+            completed = [(flight, data) for flight, data in looked_up
                          if data is not None]
             incomplete = len(completed) != len(tasks)
-            if flight_timing or incomplete:
+            if flight_timing:
                 # Reuse priced returns from the existing lookups. An unchecked
                 # outbound alone cannot satisfy a return request.
                 all_flights = [
@@ -332,15 +334,18 @@ async def search_flights(
                     if quote
                 ]
                 if incomplete:
-                    if not all_flights:
-                        raise RuntimeError("Some return options could not be checked.")
-                    for quote in all_flights:
-                        quote["return_lookup_incomplete"] = True
+                    all_flights.extend(
+                        {**flight, "return_flight": None}
+                        for flight, data in looked_up if data is None
+                    )
             else:
                 for flight, data in completed:
                     if selected := _lowest_return_quote(data, flight_timing):
                         flight["return_flight"] = selected
                         flight["price"] = selected["price"]
+            if incomplete:
+                for quote in all_flights:
+                    quote["return_lookup_incomplete"] = True
 
         if flight_timing and flight_timing.compare_departures:
             all_flights = spread_departures(
@@ -454,6 +459,32 @@ async def _search_return_flights(
         return []
 
 
+def _flight_minutes(value):
+    return value if type(value) is int and 1 <= value <= 4320 else None
+
+
+def _connections(flight_group, flights):
+    layovers = flight_group.get("layovers")
+    if isinstance(layovers, list):
+        reported = [(item.get("id"), _flight_minutes(item.get("duration")))
+                    for item in layovers[:10] if isinstance(item, dict)]
+    else:
+        reported = []
+    connections = []
+    for index, (first, second) in enumerate(zip(flights[:10], flights[1:11])):
+        arrival = (first.get("arrival_airport") or {}).get("id")
+        departure = (second.get("departure_airport") or {}).get("id")
+        airport = arrival if arrival == departure else None
+        minutes = None
+        if index < len(reported) and len(reported) == len(flights) - 1:
+            code, duration = reported[index]
+            if code and (not airport or code == airport):
+                airport, minutes = code, duration
+        if isinstance(airport, str) and re.fullmatch(r"[A-Z]{3}", airport):
+            connections.append({"airport": airport, "duration_minutes": minutes})
+    return connections
+
+
 def _parse_return_flight(flight_group: dict) -> Optional[dict]:
     """
     Parse a return flight from SerpAPI response.
@@ -483,6 +514,7 @@ def _parse_return_flight(flight_group: dict) -> Optional[dict]:
             "airline": first_flight.get("airline", "Unknown"),
             "stops": len(flights) - 1,
             "duration_minutes": flight_group.get("total_duration", 0),
+            "connections": _connections(flight_group, flights),
             "price": flight_group.get("price", 0),  # One-way price (for reference)
         }
     except Exception as e:
@@ -600,6 +632,7 @@ def _parse_flight(flight_group: dict) -> Optional[dict]:
                 "airline": return_first.get("airline", airline),  # May be different airline
                 "stops": len(return_flights) - 1,
                 "duration_minutes": flight_group.get("return_duration", 0),
+                "connections": _connections({"layovers": flight_group.get("return_layovers")}, return_flights),
             }
         
         return {
@@ -615,6 +648,7 @@ def _parse_flight(flight_group: dict) -> Optional[dict]:
             "arrival_code": arrival_code,
             "airline": airline,
             "duration_minutes": total_duration,
+            "connections": _connections(flight_group, flights),
             "stops": len(flights) - 1,  # Number of connections
             "flights": flights,  # Full flight leg data for reference
             # Return flight details (None if one-way or not available)

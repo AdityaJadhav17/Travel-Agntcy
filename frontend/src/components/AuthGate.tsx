@@ -84,7 +84,7 @@ export default function AuthGate({ children }: AuthGateProps) {
       })
       if (response.status === 401) {
         setError(
-          "That access key did not unlock the app. Check your local setup instructions and try again.",
+          "That key did not unlock the app. Check the local access key and try again.",
         )
         return
       }
@@ -151,7 +151,7 @@ export default function AuthGate({ children }: AuthGateProps) {
         {error && (
           <p
             role="status"
-            className="fixed right-4 bottom-4 z-[100] max-w-sm rounded-lg border border-amber-300/40 bg-[#292929] px-4 py-3 text-sm text-amber-100 shadow-xl"
+            className="travel-ui fixed right-4 bottom-4 z-[100] max-w-sm rounded-lg border border-travel-warning-border bg-travel-warning-soft px-4 py-3 text-sm text-travel-warning shadow-xl"
           >
             {error}
           </p>
@@ -160,39 +160,37 @@ export default function AuthGate({ children }: AuthGateProps) {
     )
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#212121] px-4 text-white">
-      <section className="w-full max-w-md rounded-2xl border border-gray-700 bg-[#292929] p-7 shadow-xl">
-        <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-emerald-400/15 text-emerald-300">
+    <main className="travel-ui flex min-h-dvh items-center justify-center bg-travel-canvas px-4 py-8 text-travel-text">
+      <section className="w-full max-w-md rounded-2xl border border-travel-border bg-travel-surface p-6 sm:p-8">
+        <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-travel-accent-soft text-travel-accent">
           <KeyRound aria-hidden="true" className="h-5 w-5" />
         </div>
-        <h1 className="text-2xl font-semibold">Unlock Travel AGNTCY</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Unlock Travel AGNTCY
+        </h1>
         {state === "checking" ? (
-          <p role="status" className="mt-3 text-sm text-gray-300">
+          <p role="status" className="mt-3 text-sm text-travel-muted">
             Checking local app access…
           </p>
         ) : state === "unavailable" ? (
           <div className="mt-3 space-y-4">
-            <p role="alert" className="text-sm text-amber-200">
+            <p role="alert" className="text-sm text-travel-warning">
               {error}
             </p>
             <button
               type="button"
               onClick={retryStatus}
-              className="rounded-lg bg-emerald-400 px-4 py-2 font-medium text-gray-950 hover:bg-emerald-300"
+              className="min-h-11 rounded-lg bg-travel-accent px-4 py-2 font-medium text-travel-on-accent hover:bg-travel-accent-hover"
             >
               Try again
             </button>
           </div>
         ) : (
           <>
-            <p className="mt-2 text-sm leading-6 text-gray-300">
-              Enter the local app access key from your setup instructions. This
-              is separate from provider API keys.
-            </p>
             <form className="mt-5 space-y-4" onSubmit={handleLogin}>
               <label
                 htmlFor="local-access-key"
-                className="block text-sm font-medium text-gray-200"
+                className="block text-sm font-medium"
               >
                 Local access key
               </label>
@@ -200,20 +198,30 @@ export default function AuthGate({ children }: AuthGateProps) {
                 id="local-access-key"
                 type="password"
                 autoComplete="current-password"
+                aria-describedby="local-access-help"
                 required
                 value={accessKey}
                 onChange={(event) => setAccessKey(event.target.value)}
-                className="w-full rounded-lg border border-gray-600 bg-[#1f1f1f] px-3 py-2.5 text-white outline-none focus:border-emerald-300 focus:ring-2 focus:ring-emerald-300/30"
+                className="w-full rounded-lg border border-travel-control bg-travel-canvas px-3 py-2.5"
               />
+              <p
+                id="local-access-help"
+                className="text-sm leading-6 text-travel-muted"
+              >
+                Local setup saves the key in{" "}
+                <code>.runtime/local-access-key.txt</code>. You can also find it
+                as <code>TRAVEL_ACCESS_KEY</code> in the project’s{" "}
+                <code>.env</code> file. Keep provider API keys separate.
+              </p>
               {error && (
-                <p role="alert" className="text-sm text-amber-200">
+                <p role="alert" className="text-sm text-travel-warning">
                   {error}
                 </p>
               )}
               <button
                 type="submit"
                 disabled={busy || !accessKey}
-                className="w-full rounded-lg bg-emerald-400 px-4 py-2.5 font-semibold text-gray-950 hover:bg-emerald-300 disabled:cursor-not-allowed disabled:opacity-60"
+                className="min-h-11 w-full rounded-lg bg-travel-accent px-4 py-2.5 font-semibold text-travel-on-accent enabled:hover:bg-travel-accent-hover disabled:cursor-not-allowed disabled:bg-travel-raised disabled:text-travel-muted"
               >
                 {busy ? "Unlocking…" : "Unlock app"}
               </button>

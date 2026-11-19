@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  **/
 
-import React, { useState, useEffect, ReactNode } from "react"
+import React, { useState, useEffect, useLayoutEffect, ReactNode } from "react"
 import { ThemeContext, Theme, ThemeContextType } from "./theme"
 
 interface ThemeProviderProps {
@@ -40,7 +40,7 @@ export const ThemeProvider: React.FC<ThemeProviderProps> = ({ children }) => {
     return () => mediaQuery.removeEventListener("change", handleChange)
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     document.body.classList.add("theme-switching")
 
     if (resolvedTheme === "light") {

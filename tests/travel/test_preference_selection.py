@@ -157,7 +157,10 @@ def test_all_contradictory_hotels_keep_flights_and_allow_hotel_retry(monkeypatch
         accommodation_type="hotel",
     )
     flight = {"airline": "Fixture Air", "price": 100, "currency": "USD",
-              "departure_time": f"{departure} 09:00", "arrival_time": f"{departure} 12:00"}
+              "departure_time": f"{departure} 09:00", "arrival_time": f"{departure} 12:00",
+              "return_flight": {"airline": "Fixture Air",
+                                "departure_time": f"{params.end_date} 13:00",
+                                "arrival_time": f"{params.end_date} 16:00"}}
     hostel = {"name": "Fixture Hostel", "price": 100, "total_price": 200,
               "property_type": "hostel", "accommodation_evidence_source": "provider"}
     monkeypatch.setattr(graph_module, "get_flights_via_a2a", AsyncMock(return_value=[flight]))

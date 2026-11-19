@@ -23,7 +23,12 @@ const flightResult = {
       departure_time: "09:00",
       arrival_time: "17:00",
       stops: 0,
-      return_flight: null,
+      return_flight: {
+        airline: "Timing Fixture Air",
+        departure_time: "10:00",
+        arrival_time: "15:00",
+        stops: 0,
+      },
     },
   ],
   hotels: [],
@@ -171,6 +176,41 @@ async function submit(page: Page, text = prompt) {
   await expect(page.getByRole("status")).toHaveText("Searching fixture")
 }
 
+test("theme switch recolors the actual trip and the compact editor stays usable", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  await emit(page, {
+    type: "done",
+    result: { response: "Flight options", travel_result: flightResult },
+  })
+  const results = page.getByRole("region", { name: "Travel results" })
+  const card = results.getByRole("article").first()
+  const app = page.locator(".travel-ui").first()
+  await expect(app).toHaveCSS("background-color", "rgb(23, 23, 23)")
+  await expect(card).toHaveCSS("background-color", "rgb(32, 32, 32)")
+  await page.getByRole("button", { name: "Switch to light mode" }).click()
+  await expect(app).toHaveCSS("background-color", "rgb(247, 245, 239)")
+  await expect(card).toHaveCSS("background-color", "rgb(255, 255, 255)")
+  const summary = page.getByRole("region", { name: "Trip details" })
+  await expect(
+    summary.getByRole("button", { name: "Change dates" }),
+  ).toBeHidden()
+  await summary.getByRole("button", { name: "Edit trip" }).press("Enter")
+  await summary.getByRole("button", { name: "Change dates" }).click()
+  await expect(summary.getByLabel("Departure")).toHaveCSS(
+    "color-scheme",
+    "light",
+  )
+  await page.reload()
+  await expect(
+    page.getByRole("button", { name: "Switch to dark mode" }),
+  ).toBeVisible()
+})
+
 test("flight cards expose the fare tradeoff and both travel days on a narrow screen", async ({
   page,
 }, testInfo) => {
@@ -180,17 +220,21 @@ test("flight cards expose the fare tradeoff and both travel days on a narrow scr
   await submit(page)
   const returnFlight = {
     airline: "Return Fixture Air",
-    departure_time: "2026-12-12 22:30",
-    arrival_time: "2026-12-13 01:10",
+    departure_time: "2026-12-12T22:30:00",
+    arrival_time: "2026-12-13 01:10:00",
     stops: 0,
+    duration_minutes: 160,
   }
   const options = [
     {
       ...flightResult.flights[0],
       id: "lowest",
       airline: "Connection Air",
+      price_scope: "requested_party",
       total_usd: 240,
       stops: 1,
+      duration_minutes: 345,
+      connections: [{ airport: "DEN", duration_minutes: 65 }],
       return_flight: returnFlight,
     },
     {
@@ -206,6 +250,7 @@ test("flight cards expose the fare tradeoff and both travel days on a narrow scr
       id: "incomplete",
       airline: "Incomplete Air",
       total_usd: 99,
+      departure_time: "2026-12-10T22:00:00Z",
       return_flight: null,
     },
   ]
@@ -213,21 +258,51 @@ test("flight cards expose the fare tradeoff and both travel days on a narrow scr
     type: "done",
     result: {
       response: "Three flight options.",
-      travel_result: { ...flightResult, flights: options },
+      travel_result: {
+        ...flightResult,
+        flights: options,
+        origin_city: "San Francisco",
+        destination_city: "Boston",
+        origin_airport: "SFO",
+        destination_airport: "BOS",
+        adults: 3,
+        departure_period_legs: ["return"],
+      },
     },
   })
   const results = page.getByRole("region", { name: "Travel results" })
   await expect(
-    results.getByText(
-      "Fares start at $240 round-trip, with a nonstop outbound for $35 more.",
-    ),
-  ).toBeInViewport()
+    results.getByText(/Nonstop .* for \$35 more than the lowest fare/),
+  ).toBeVisible()
   const cards = results.getByRole("article")
-  await expect(cards).toHaveCount(3)
+  await expect(
+    results.getByRole("heading", { name: "San Francisco → Boston" }),
+  ).toBeVisible()
+  await expect(cards).toHaveCount(2)
+  await expect(
+    results.getByText("2 complete round-trip quotes · 1 incomplete quote"),
+  ).toBeVisible()
   await expect(cards.nth(0)).toContainText("$240")
+  await expect(cards.nth(0)).toContainText("Total for 3 adults")
+  await expect(
+    page.getByRole("textbox", { name: "Refine this trip" }),
+  ).toBeVisible()
   await expect(cards.nth(1)).toContainText("7:00 AM")
-  await expect(cards.nth(1)).toContainText("Dec 13")
+  await expect(cards.nth(1)).toContainText("10:30 PM")
+  await expect(cards.nth(1)).toContainText("1:10 AM")
+  await expect(cards.nth(1)).toContainText("Evening")
+  await expect(cards.nth(1)).toContainText("Next day · Dec 13")
+  await expect(cards.nth(1)).toContainText("2h 40m")
+  await expect(cards.first()).toContainText("5h 45m")
+  await cards.first().getByText("Connection details", { exact: true }).click()
+  await expect(cards.first().getByText("Outbound · DEN (1h 5m)")).toBeVisible()
+  await results
+    .getByText("Review incomplete round-trip quote", { exact: true })
+    .click()
+  await expect(cards).toHaveCount(3)
   await expect(cards.nth(2)).toContainText("Return details unavailable")
+  await expect(cards.nth(2)).toContainText("2026-12-10T22:00:00Z")
+  await expect(cards.nth(2)).not.toContainText("Evening")
   await expect(cards.nth(2)).not.toContainText("Round trip")
   await expect(
     results.getByText("Quoted flight + full hotel stay", { exact: false }),
@@ -235,7 +310,10 @@ test("flight cards expose the fare tradeoff and both travel days on a narrow scr
   expect(await results.evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(
     Math.ceil((await results.boundingBox())!.width),
   )
-  const notes = page.getByText("Travel notes", { exact: true })
+  const notes = page.getByRole("menuitem", {
+    name: "Original response",
+    exact: true,
+  })
   await expect(
     page.getByText("Three flight options.", { exact: true }),
   ).toBeHidden()
@@ -243,6 +321,7 @@ test("flight cards expose the fare tradeoff and both travel days on a narrow scr
     body: await page.screenshot(),
     contentType: "image/png",
   })
+  await page.getByRole("button", { name: "Result actions" }).click()
   await notes.click()
   await expect(
     page.getByText("Three flight options.", { exact: true }),
@@ -258,6 +337,7 @@ test("new chat starters prepare an editable draft and keep the agent graph optio
   await expect(
     page.getByRole("heading", { name: "Plan a trip", exact: true }),
   ).toBeVisible()
+  await page.getByRole("button", { name: "Help", exact: true }).click()
   const graph = page.getByRole("button", { name: "Show agent graph" })
   await expect(graph).toHaveAttribute("aria-expanded", "false")
   await graph.click()
@@ -265,14 +345,21 @@ test("new chat starters prepare an editable draft and keep the agent graph optio
     page.getByRole("button", { name: "Hide agent graph" }),
   ).toHaveAttribute("aria-expanded", "true")
   await page.getByRole("button", { name: "Hide agent graph" }).click()
+  await page.getByRole("button", { name: "Close help" }).click()
 
-  const input = page.getByRole("textbox", { name: "Message Travel AGNTCY" })
+  const input = page.getByRole("textbox", {
+    name: "Where would you like to go?",
+  })
   const starters = page.getByRole("group", { name: "Search starters" })
   await starters.getByRole("button", { name: "Find flights" }).click()
-  await expect(input).toHaveValue("Find flights from ")
+  await expect(input).toHaveValue(
+    "Find a weekend flight from Dallas to San Francisco for three adults.",
+  )
   await expect(input).toBeFocused()
   await starters.getByRole("button", { name: "Find a hotel" }).click()
-  await expect(input).toHaveValue("Find a hotel in ")
+  await expect(input).toHaveValue(
+    "Find a hotel in Boston for two adults next weekend.",
+  )
   await input.fill("Find a hotel in Boston")
   await expect(
     starters.getByRole("button", { name: "Find flights" }),
@@ -282,16 +369,76 @@ test("new chat starters prepare an editable draft and keep the agent graph optio
 
   await submit(page)
   await expect(starters).toHaveCount(0)
-  await expect(
-    page.getByText("Confirm prices and availability before booking."),
-  ).toHaveCount(0)
+  await expect(page.getByText(/Check the final airfare/)).toHaveCount(0)
   await emit(page, {
     type: "done",
     result: { response: "Flights found.", travel_result: flightResult },
   })
+  await expect(page.getByText(/Check the final airfare/)).toBeVisible()
   await expect(
-    page.getByText("Confirm prices and availability before booking."),
+    page.getByRole("button", { name: "Result actions" }),
+  ).toHaveAttribute("aria-expanded", "false")
+})
+
+test("hotel cards keep caveats and budget details visible while the original response stays closed", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  const notice = "Confirm late arrival with the property."
+  const budgetMessage =
+    "Within quoted-cost budget: USD 200.00 of USD 250.00 for full hotel stay. Meals and unquoted fees are excluded."
+  await emit(page, {
+    type: "done",
+    result: {
+      response: `${budgetMessage}\n\n**Fixture Hotel**\n\nFront desk closes at midnight.\n\n${notice}`,
+      travel_result: {
+        ...flightResult,
+        kind: "hotel_only",
+        flights: [],
+        hotels: [
+          {
+            id: "fixture-hotel",
+            name: "Fixture Hotel",
+            nightly_usd: 100,
+            total_usd: 200,
+            overall_rating: null,
+            location_rating: null,
+          },
+        ],
+        total_usd: null,
+        notice,
+      },
+      budget_assessment: {
+        status: "within",
+        currency: "USD",
+        limit: 250,
+        quoted_total: 200,
+        scope: "full hotel stay",
+        message: budgetMessage,
+      },
+    },
+  })
+  const results = page.getByRole("region", { name: "Travel results" })
+  await expect(
+    results.getByText("Fixture Hotel", { exact: true }),
   ).toBeVisible()
+  await expect(results.getByText(notice)).toBeVisible()
+  const budget = page.getByRole("region", { name: "Budget assessment" })
+  await expect(
+    budget.getByRole("heading", { name: "Quote is $50 under budget" }),
+  ).toBeVisible()
+  await expect(budget).toContainText("Meals and unquoted fees are excluded.")
+  await expect(budget).not.toContainText("Within quoted-cost budget:")
+  const supplemental = page.getByText("Front desk closes at midnight.")
+  await expect(supplemental).toBeHidden()
+  await page.getByRole("button", { name: "Result actions" }).click()
+  await page.getByRole("menuitem", { name: "Original response" }).click()
+  await expect(supplemental).toBeVisible()
+  await page.getByRole("button", { name: "Result actions" }).click()
+  await page.getByRole("menuitem", { name: "Hide original response" }).click()
+  await expect(page.getByText(notice, { exact: true })).toHaveCount(1)
 })
 
 test("narrow search acknowledges Send immediately and keeps Stop fixed through preview", async ({
@@ -301,14 +448,18 @@ test("narrow search acknowledges Send immediately and keeps Stop fixed through p
   await page.emulateMedia({ reducedMotion: "reduce" })
   await controlledTimingStream(page, true)
   await page.goto("/")
-  const input = page.getByRole("textbox", { name: "Message Travel AGNTCY" })
+  const input = page.getByRole("textbox", {
+    name: "Where would you like to go?",
+  })
   await input.fill(prompt)
   const send = page.getByRole("button", { name: "Send message" })
   const initial = await send.boundingBox()
   await send.click()
   const status = page.getByRole("status")
-  await expect(status).toHaveText("Reading your trip details")
+  await expect(status).toHaveText("Thinking")
+  await expect(status.locator("span")).toHaveCSS("animation-name", "none")
   await expect(status).toBeInViewport()
+  await page.getByRole("button", { name: "Help", exact: true }).click()
   const showGraph = page.getByRole("button", { name: "Show agent graph" })
   await expect(showGraph).toHaveAttribute("aria-expanded", "false")
   await showGraph.click()
@@ -316,8 +467,18 @@ test("narrow search acknowledges Send immediately and keeps Stop fixed through p
     page.getByRole("button", { name: "Hide agent graph" }),
   ).toHaveAttribute("aria-expanded", "true")
   await page.getByRole("button", { name: "Hide agent graph" }).click()
+  await page.getByRole("button", { name: "Close help" }).click()
+  await emit(page, {
+    type: "status",
+    component: "flights",
+    message: "Searching flights",
+  })
+  await expect(status).toHaveText("Searching flights")
+  const draft = "Keep the same dates"
+  await input.fill(draft)
+  await input.press("Enter")
   await emit(page, previewEvent)
-  await expect(status).toHaveText("Checking return options")
+  await expect(status).toHaveText("Checking return flights")
   await expect(
     page.getByRole("region", { name: "Provisional outbound flights" }),
   ).toBeInViewport()
@@ -336,6 +497,34 @@ test("narrow search acknowledges Send immediately and keeps Stop fixed through p
     page.getByRole("region", { name: "Travel results" }),
   ).toBeInViewport()
   await expect(stop).toHaveCount(0)
+  await expect(
+    page.getByRole("textbox", { name: "Refine this trip" }),
+  ).toHaveValue(draft)
+})
+
+test("unfinished drafts stay with their trip when switching and starting over", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  await emit(page, {
+    type: "done",
+    result: { response: "Flight options", travel_result: flightResult },
+  })
+  const input = page.getByRole("textbox")
+  await expect(
+    page.getByRole("region", { name: "Travel results" }),
+  ).toBeVisible()
+  await input.fill("Change only the return flight")
+  const newTrip = page.getByRole("button", { name: "New trip", exact: true })
+  await newTrip.click()
+  await expect(input).toBeEmpty()
+  await input.fill("A hotel in Boston")
+  await page.getByRole("button", { name: "SFO → BOS", exact: true }).click()
+  await expect(input).toHaveValue("Change only the return flight")
+  await newTrip.click()
+  await expect(input).toBeEmpty()
 })
 
 test("preview and completion leave earlier messages in view when reading history", async ({
@@ -467,9 +656,9 @@ test("outbound preview renders while return is pending and yields to verified fl
   await emit(page, previewEvent)
   await expect(preview).toBeVisible()
   await expect(preview).toContainText("Return details and fare pending")
-  await expect(preview.getByText("8:00 AM", { exact: true })).toBeVisible()
-  await expect(preview.getByText("4:00 PM", { exact: true })).toBeVisible()
-  await expect(preview.getByText("1 stop", { exact: true })).toBeVisible()
+  await expect(preview).toContainText("8:00 AM")
+  await expect(preview).toContainText("4:00 PM")
+  await expect(preview).toContainText("1 stop")
   await expect(preview).not.toContainText("123")
   await expect(preview).not.toContainText("hidden-fixture-token")
   await expect(preview.getByRole("button")).toHaveCount(0)
@@ -504,7 +693,7 @@ test("outbound preview renders while return is pending and yields to verified fl
     component: "flights",
     travel_result: roundTrip,
   })
-  await expect(cards).toContainText("Return · Fixture Return Air")
+  await expect(cards).toContainText("Fixture Return Air")
   await expect(preview).toHaveCount(0)
   await waitForMeasurement(
     page,
@@ -515,7 +704,7 @@ test("outbound preview renders while return is pending and yields to verified fl
     type: "done",
     result: { response: "Round trip confirmed.", travel_result: roundTrip },
   })
-  await expect(cards).toContainText("Return · Fixture Return Air")
+  await expect(cards).toContainText("Fixture Return Air")
   await expect(
     page.getByRole("button", { name: "Stop", exact: true }),
   ).toHaveCount(0)
@@ -538,9 +727,10 @@ test("first checked fare renders before ranking and stays out of saved history",
     name: "Provisional outbound flights",
   })
   await expect(outbound).toBeVisible()
+  const outboundCard = await outbound.getByRole("article").elementHandle()
   const early = page.getByRole("region", { name: "First checked round trip" })
   const flight = {
-    outbound: { ...previewEvent.flights[0], airline: "Early Fare Air" },
+    outbound: previewEvent.flights[0],
     returned: {
       airline: "Return Air",
       departure_time: "18:00",
@@ -556,7 +746,12 @@ test("first checked fare renders before ranking and stays out of saved history",
   await expect(early).toHaveCount(0)
   await emit(page, { type: "verified_flight_preview", flight })
   await expect(early).toContainText("$275")
-  await expect(early).toContainText("Return · Return Air")
+  expect(
+    await outboundCard.evaluate((card) =>
+      card.closest("section")?.getAttribute("aria-label"),
+    ),
+  ).toBe("First checked round trip")
+  await expect(early).toContainText("Return Air")
   await expect(early).not.toContainText("hidden-fixture-token")
   await expect(early.getByRole("button")).toHaveCount(0)
   await expect(page.getByRole("status")).toHaveText("Checking more fares")
@@ -568,7 +763,7 @@ test("first checked fare renders before ranking and stays out of saved history",
   expect((await measurements(page))![0].terminalReceivedMs).toBeUndefined()
   expect(
     await page.evaluate(() => localStorage.getItem("travel_chat_history")),
-  ).not.toContain("Early Fare Air")
+  ).not.toContain("Provisional Fixture Air")
 
   await emit(page, {
     type: "result",
@@ -644,44 +839,130 @@ test("flight sort and nonstop filter act locally and keep search actions separat
     type: "done",
     result: { response: "Ranked flights.", travel_result: result },
   })
-  const choices = page
-    .getByRole("region", { name: "Travel results" })
-    .locator("article")
+  const results = page.getByRole("region", { name: "Travel results" })
+  const choices = results.getByRole("article")
   await expect(choices.first()).toContainText("Both Ways Air")
+  await expect(page.getByLabel("Sort by").locator("option:checked")).toHaveText(
+    "Search order",
+  )
   await page.getByLabel("Sort by").selectOption("fare")
   await expect(choices.first()).toContainText("Outbound Nonstop Air")
-  await expect(choices.last()).toContainText("Unpriced Air")
+  await expect(choices).toHaveCount(2)
   const nonstop = page.getByLabel("Nonstop both ways")
   await nonstop.check()
   await expect(choices).toHaveCount(1)
   await expect(choices.first()).toContainText("Both Ways Air")
   await nonstop.uncheck()
-  await expect(choices).toHaveCount(3)
+  await expect(choices).toHaveCount(2)
+  await results
+    .getByText("Review incomplete round-trip quote", { exact: true })
+    .click()
+  await expect(choices.last()).toContainText("Unpriced Air")
+  await results
+    .getByText("Review incomplete round-trip quote", { exact: true })
+    .click()
   const searches = page.getByRole("group", { name: "Run another search" })
   await expect(
     searches.getByRole("button", { name: "Compare cheaper dates" }),
   ).toBeVisible()
-  await expect(
-    searches.getByRole("button", { name: "Why this flight?" }),
-  ).toHaveCount(0)
-  await expect(
-    page
-      .getByRole("group", { name: "Actions for this result" })
-      .getByRole("button", { name: "Why this flight?" }),
-  ).toBeVisible()
+  await expect(choices.first()).toContainText("$200")
+  await expect(choices.nth(1)).toContainText("Nonstop both ways for $150 more")
+  await expect(page.getByText(/\$150 more/)).toHaveCount(1)
+  await expect(page.getByText("Compare fares from this search")).toHaveCount(0)
   expect(await measurements(page)).toHaveLength(1)
 
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   await submit(page, "Find another flight to Boston")
   await emit(page, {
     type: "done",
-    result: { response: "Other ranked flights.", travel_result: result },
+    result: {
+      response: "Other ranked flights.",
+      travel_result: { ...result, origin: "LAX" },
+    },
   })
   await nonstop.check()
   await expect(choices).toHaveCount(1)
-  await page.getByRole("button", { name: prompt, exact: true }).click()
+  await page.getByRole("button", { name: "SFO → BOS", exact: true }).click()
   await expect(nonstop).not.toBeChecked()
-  await expect(choices).toHaveCount(3)
+  await expect(choices).toHaveCount(2)
+})
+
+test("same-fare comparison uses dated arrivals and explains matching return times", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  const outbound = {
+    ...flightResult.flights[0],
+    price_scope: "requested_party",
+    arrival_airport: "BOS",
+    stops: 1,
+  }
+  await emit(page, {
+    type: "done",
+    result: {
+      response: "Flight quotes.",
+      travel_result: {
+        ...flightResult,
+        flights: [
+          { ...outbound, id: "f1", arrival_time: "2026-12-10 09:00" },
+          { ...outbound, id: "f2", arrival_time: "2026-12-10 10:25" },
+        ],
+      },
+    },
+  })
+  const results = page.getByRole("region", { name: "Travel results" })
+  await expect(
+    results.getByText(
+      "Same fare · Outbound arrives 1h 25m earlier · Same return times",
+    ),
+  ).toBeVisible()
+  await results.getByLabel("Nonstop both ways").check()
+  await expect(results.getByRole("status")).toHaveText(
+    "No options in these results are nonstop both ways.",
+  )
+  await results.getByRole("button", { name: "Clear filter" }).click()
+  await expect(results.getByRole("article")).toHaveCount(2)
+})
+
+test("an all-incomplete result offers a disclosure and keeps outbound fares out of comparisons", async ({
+  page,
+}) => {
+  await controlledTimingStream(page)
+  await page.goto("/")
+  await submit(page)
+  await emit(page, {
+    type: "done",
+    result: {
+      response: "Incomplete round-trip quotes.",
+      travel_result: {
+        ...flightResult,
+        flights: [],
+        incomplete_flight_count: 1,
+        incomplete_flights: [
+          {
+            ...flightResult.flights[0],
+            total_usd: null,
+            return_flight: null,
+          },
+        ],
+      },
+    },
+  })
+  const results = page.getByRole("region", { name: "Travel results" })
+  await expect(
+    results.getByText("No complete round-trip quotes · 1 incomplete quote"),
+  ).toBeVisible()
+  await expect(results.getByLabel("Sort by")).toHaveCount(0)
+  await results
+    .getByText("Review incomplete round-trip quote", { exact: true })
+    .click()
+  await expect(results.getByText("Return details unavailable")).toBeVisible()
+  await expect(
+    results.getByRole("button", { name: "Save option" }),
+  ).toHaveCount(0)
+  await expect(results.getByText("$240", { exact: true })).toHaveCount(0)
 })
 
 test("preview stays with its pending chat, clears on Stop, and cannot reappear after reload", async ({
@@ -695,7 +976,7 @@ test("preview stays with its pending chat, clears on Stop, and cannot reappear a
   })
   await emit(page, previewEvent, prompt)
   await expect(preview).toBeVisible()
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   await submit(page, "Another flight")
   await expect(preview).toHaveCount(0)
   await page.getByRole("button", { name: prompt, exact: true }).click()
@@ -709,7 +990,7 @@ test("preview stays with its pending chat, clears on Stop, and cannot reappear a
   await expect(preview).toHaveCount(0)
 })
 
-test("a completed render remains eligible in the latency summary after New chat", async ({
+test("a completed render remains eligible in the latency summary after New trip", async ({
   page,
 }) => {
   await controlledTimingStream(page)
@@ -727,7 +1008,7 @@ test("a completed render remains eligible in the latency summary after New chat"
     (entry) => typeof entry?.finalResponseRenderedMs === "number",
   )
 
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   const [entry] = (await measurements(page))!
   expect(entry.finalResponseRenderedMs).toEqual(expect.any(Number))
   expect(entry.renderExcluded).not.toBe(true)
@@ -774,7 +1055,7 @@ test("a stream that finishes in a background chat never gets render timings on r
   await controlledTimingStream(page)
   await page.goto("/")
   await submit(page, "Background flight")
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   await submit(page, "Visible flight")
 
   await emit(
@@ -803,9 +1084,7 @@ test("a stream that finishes in a background chat never gets render timings on r
   expect(entry.finalResponseRenderedMs).toBeUndefined()
   expect(entry.renderExcluded).toBe(true)
 
-  await page
-    .getByRole("button", { name: "Background flight", exact: true })
-    .click()
+  await page.getByRole("button", { name: "SFO → BOS", exact: true }).click()
   await expect(
     page.getByText("Background flight done.", { exact: true }),
   ).toBeHidden()
@@ -842,7 +1121,7 @@ test("request errors and Stop are recorded as terminal failures, never successes
   await expect(preview).toHaveCount(0)
   await waitForMeasurement(page, (entry) => entry?.outcome === "error")
 
-  await page.getByRole("button", { name: "New chat", exact: true }).click()
+  await page.getByRole("button", { name: "New trip", exact: true }).click()
   await submit(page)
   await page.getByRole("button", { name: "Stop", exact: true }).click()
   await expect(page.getByText("Search stopped.", { exact: true })).toBeVisible()

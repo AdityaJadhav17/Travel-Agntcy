@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from "react"
-import type { TripContext } from "@/types/tripContext"
+import { useId, useState, type FormEvent, type ReactNode } from "react"
+import { ChevronDown } from "lucide-react"
+import { formatTripDates, type TripContext } from "@/types/tripContext"
 
 const formatDate = new Intl.DateTimeFormat("en-US", {
   month: "short",
@@ -10,20 +11,26 @@ const formatDate = new Intl.DateTimeFormat("en-US", {
 const day = (value: string) =>
   value ? formatDate.format(new Date(value)) : "Not set"
 const fieldStyle =
-  "min-h-10 w-full rounded-md border border-white/20 bg-[#1d1d1d] px-2 text-white [color-scheme:dark]"
+  "min-h-10 w-full rounded-md border border-travel-control bg-travel-surface px-2 text-travel-text"
 const actionStyle =
-  "min-h-10 rounded-md px-2 text-sm font-medium text-emerald-200 hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-emerald-300 disabled:opacity-50"
+  "min-h-10 rounded-md px-2 text-sm font-medium text-travel-text hover:bg-travel-selected focus-visible:outline-2 focus-visible:outline-travel-accent disabled:opacity-50"
 
 export default function TripSummary({
   trip,
+  composerLabel,
+  showDetails,
   disabled,
   onSearch,
 }: {
   trip: TripContext
+  composerLabel: ReactNode
+  showDetails: boolean
   disabled: boolean
   onSearch: (prompt: string) => void
 }) {
   const [editing, setEditing] = useState<"dates" | "travelers" | null>(null)
+  const [expanded, setExpanded] = useState(false)
+  const controlsId = useId()
   const [children, setChildren] = useState(trip.children ?? 0)
   const [error, setError] = useState("")
   const flight =
@@ -42,6 +49,8 @@ export default function TripSummary({
     trip.adults === null
       ? "Travelers not set"
       : `${trip.adults} adult${trip.adults === 1 ? "" : "s"}${trip.children ? ` · ${trip.children} ${trip.children === 1 ? "child" : "children"}` : ""}`
+  const dates = oneWay ? day(start) : formatTripDates(start, end)
+  const displayDates = dates || "Dates not set"
 
   function review(next: "dates" | "travelers") {
     setChildren(trip.children ?? 0)
@@ -98,25 +107,49 @@ export default function TripSummary({
       prompt = `Change the traveler count to ${adultCount} ${adultCount === 1 ? "adult" : "adults"} and ${children} ${children === 1 ? "child" : "children"}${children ? ` (ages ${ages.join(", ")})` : ""}. Keep the other trip details.`
     }
     setEditing(null)
+    setExpanded(false)
     onSearch(prompt)
   }
 
   return (
     <section
       aria-label="Trip details"
-      className="mb-2 w-full max-w-[768px] rounded-lg border border-white/15 bg-[#282828] px-3 py-1.5 text-sm text-gray-200"
+      className="mb-1.5 w-full text-sm text-travel-muted"
     >
-      <div className="flex flex-wrap items-center justify-between gap-x-3">
-        <p className="min-w-0 break-words">
-          <strong className="text-white">{route}</strong>
-          {(hotel || flight || start || end) &&
-            ` · ${day(start)}${oneWay ? "" : ` – ${day(end)}`}`}
+      {showDetails && (
+        <p className="wrap-break-word">
+          <strong className="font-semibold text-travel-text">{route}</strong>
+          {(hotel || flight || start || end) && ` · ${displayDates}`}
           {trip.search_type !== "activity_only" && ` · ${party}`}
           {flight &&
             trip.is_one_way !== null &&
             (oneWay ? " · One-way" : " · Round trip")}
         </p>
+      )}
+      <div className="flex items-center justify-between gap-2">
+        {composerLabel}
         {(flight || hotel) && (
+          <button
+            type="button"
+            className={`${actionStyle} inline-flex shrink-0 items-center gap-1`}
+            disabled={disabled}
+            aria-expanded={expanded}
+            aria-controls={controlsId}
+            onClick={() => {
+              setExpanded(!expanded)
+              setEditing(null)
+            }}
+          >
+            Edit trip
+            <ChevronDown
+              aria-hidden="true"
+              className={`size-4 ${expanded ? "rotate-180" : ""}`}
+            />
+          </button>
+        )}
+      </div>
+      {(flight || hotel) && (
+        <div id={controlsId} hidden={!expanded}>
           <div className="flex flex-wrap gap-1">
             <button
               type="button"
@@ -137,117 +170,119 @@ export default function TripSummary({
               Edit travelers
             </button>
           </div>
-        )}
-      </div>
-      {editing && !disabled && (
-        <form
-          key={editing}
-          aria-label={editing === "dates" ? "Review dates" : "Review travelers"}
-          onSubmit={submit}
-          className="mt-2 max-h-[45dvh] space-y-2 overflow-y-auto border-t border-white/10 py-2"
-        >
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {editing === "dates" ? (
-              <>
-                <label className="space-y-1">
-                  {hotel ? "Check-in" : "Departure"}
-                  <input
-                    className={fieldStyle}
-                    type="date"
-                    name="start"
-                    defaultValue={start}
-                    required
-                  />
-                </label>
-                {!oneWay && (
-                  <label className="space-y-1">
-                    {hotel ? "Check-out" : "Return"}
-                    <input
-                      className={fieldStyle}
-                      type="date"
-                      name="end"
-                      defaultValue={end}
-                      required
-                    />
-                  </label>
-                )}
-              </>
-            ) : (
-              <>
-                <label className="space-y-1">
-                  Adults
-                  <input
-                    className={fieldStyle}
-                    type="number"
-                    name="adults"
-                    min={1}
-                    max={9}
-                    defaultValue={trip.adults ?? ""}
-                    required
-                  />
-                </label>
-                <label className="space-y-1">
-                  Children
-                  <select
-                    className={fieldStyle}
-                    value={children}
-                    onChange={(event) =>
-                      setChildren(Number(event.currentTarget.value))
-                    }
-                  >
-                    {Array.from({ length: 9 }, (_, count) => (
-                      <option key={count} value={count}>
-                        {count}
-                      </option>
+          {editing && !disabled && (
+            <form
+              key={editing}
+              aria-label={
+                editing === "dates" ? "Review dates" : "Review travelers"
+              }
+              onSubmit={submit}
+              className="mt-2 max-h-[45dvh] space-y-2 overflow-y-auto border-t border-travel-border py-2"
+            >
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {editing === "dates" ? (
+                  <>
+                    <label className="space-y-1">
+                      {hotel ? "Check-in" : "Departure"}
+                      <input
+                        className={fieldStyle}
+                        type="date"
+                        name="start"
+                        defaultValue={start}
+                        required
+                      />
+                    </label>
+                    {!oneWay && (
+                      <label className="space-y-1">
+                        {hotel ? "Check-out" : "Return"}
+                        <input
+                          className={fieldStyle}
+                          type="date"
+                          name="end"
+                          defaultValue={end}
+                          required
+                        />
+                      </label>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <label className="space-y-1">
+                      Adults
+                      <input
+                        className={fieldStyle}
+                        type="number"
+                        name="adults"
+                        min={1}
+                        max={9}
+                        defaultValue={trip.adults ?? ""}
+                        required
+                      />
+                    </label>
+                    <label className="space-y-1">
+                      Children
+                      <select
+                        className={fieldStyle}
+                        value={children}
+                        onChange={(event) =>
+                          setChildren(Number(event.currentTarget.value))
+                        }
+                      >
+                        {Array.from({ length: 9 }, (_, count) => (
+                          <option key={count} value={count}>
+                            {count}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {Array.from({ length: children }, (_, index) => (
+                      <label className="space-y-1" key={index}>
+                        Child {index + 1} age
+                        <input
+                          className={fieldStyle}
+                          type="number"
+                          name={`child-${index}`}
+                          min={0}
+                          max={17}
+                          defaultValue={trip.children_ages[index] ?? ""}
+                          required
+                        />
+                      </label>
                     ))}
-                  </select>
-                </label>
-                {Array.from({ length: children }, (_, index) => (
-                  <label className="space-y-1" key={index}>
-                    Child {index + 1} age
-                    <input
-                      className={fieldStyle}
-                      type="number"
-                      name={`child-${index}`}
-                      min={0}
-                      max={17}
-                      defaultValue={trip.children_ages[index] ?? ""}
-                      required
-                    />
-                  </label>
-                ))}
-              </>
-            )}
-          </div>
-          {editing === "dates" &&
-            trip.search_type === "full_trip" &&
-            (trip.hotel_check_in_date || trip.hotel_check_out_date) && (
-              <p className="text-gray-300">
-                Saved hotel dates stay {day(trip.hotel_check_in_date)} –{" "}
-                {day(trip.hotel_check_out_date)}.
-              </p>
-            )}
-          {error && (
-            <p role="alert" className="text-amber-200">
-              {error}
-            </p>
+                  </>
+                )}
+              </div>
+              {editing === "dates" &&
+                trip.search_type === "full_trip" &&
+                (trip.hotel_check_in_date || trip.hotel_check_out_date) && (
+                  <p className="text-travel-muted">
+                    Saved hotel dates stay {day(trip.hotel_check_in_date)} –{" "}
+                    {day(trip.hotel_check_out_date)}.
+                  </p>
+                )}
+              {error && (
+                <p role="alert" className="text-travel-warning">
+                  {error}
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  className={`${actionStyle} bg-travel-accent-soft`}
+                >
+                  Search with changes
+                </button>
+                <button
+                  type="button"
+                  className={actionStyle}
+                  onClick={() => setEditing(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
           )}
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              className={`${actionStyle} bg-emerald-900/70`}
-            >
-              Search with changes
-            </button>
-            <button
-              type="button"
-              className={actionStyle}
-              onClick={() => setEditing(null)}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+        </div>
       )}
     </section>
   )

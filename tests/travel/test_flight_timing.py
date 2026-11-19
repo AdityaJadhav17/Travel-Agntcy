@@ -269,5 +269,7 @@ def test_roundtrip_failure_keeps_verified_fares_and_marks_partial(monkeypatch, f
     result = asyncio.run(flight_graph.serve_conversation("Find round-trip flights", [], {}))
     assert stalled_cancelled == (failure == "timeout")
     assert [flight["total_usd"] for flight in result["travel_result"]["flights"]] == [250]
+    assert result["travel_result"]["incomplete_flight_count"] == 1
+    assert result["travel_result"]["incomplete_flights"][0]["total_usd"] is None
     assert PARTIAL_RETURN_NOTICE in result["travel_result"]["notice"]
     assert PARTIAL_RETURN_NOTICE in result["response"]

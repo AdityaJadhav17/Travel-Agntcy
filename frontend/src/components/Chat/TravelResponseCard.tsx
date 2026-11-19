@@ -9,19 +9,21 @@
  * - Activity-only searches
  **/
 
-import React from "react"
+import React, { useState } from "react"
 import { BudgetAssessment } from "@/types/budget"
 import { parseTravelResult, type TravelResult } from "@/types/travelResult"
+import { formatFare } from "@/utils/flightDisplay"
 import StructuredTravelResultCard from "./StructuredTravelResultCard"
+import ActionMenu from "../Navigation/ActionMenu"
 import ReactMarkdown from "react-markdown"
 import {
   Plane,
   Hotel,
   Calendar,
   Clock,
+  Ellipsis,
   MapPin,
   Star,
-  Activity,
 } from "lucide-react"
 
 interface TravelResponseCardProps {
@@ -122,7 +124,8 @@ const parseFullTripResponse = (content: string) => {
     if (
       trimmed.includes("Great news") ||
       trimmed.includes("found the best") ||
-      trimmed.includes("lowest eligible quote among")
+      trimmed.includes("lowest eligible quote among") ||
+      trimmed.includes("provisional pairing from the returned options")
     ) {
       sections.intro = trimmed.replace(/\*\*/g, "").replace(/🎉/g, "").trim()
       continue
@@ -385,7 +388,9 @@ const parseHotelsOnlyResponse = (content: string) => {
     // Parse price: 💰 $XX/night × N = $XX total
     if (currentHotel && trimmed.includes("💰")) {
       const priceMatch = trimmed.match(/\$([\d.]+)\/night/)
-      const totalMatch = trimmed.match(/\*\*\$([\d.]+)\s*total\*\*/)
+      const totalMatch = trimmed.match(
+        /\*\*\$([\d.]+)\s*(?:total|for \d+ nights?)\*\*/,
+      )
       if (priceMatch) currentHotel.pricePerNight = `$${priceMatch[1]}`
       if (totalMatch) currentHotel.totalPrice = `$${totalMatch[1]}`
     }
@@ -416,7 +421,6 @@ const parseActivitiesOnlyResponse = (content: string) => {
   const result: {
     location: string
     activities: Array<{
-      rank: number
       name: string
       type: string
       address: string
@@ -440,12 +444,13 @@ const parseActivitiesOnlyResponse = (content: string) => {
     }
 
     // Parse activity: **1. Name** - Type
-    const activityMatch = trimmed.match(/\*\*(\d+)\.\s*([^*]+)\*\*\s*-\s*(.+)/)
+    const activityMatch = trimmed.match(
+      /^\*\*\d+\.\s*([^*]+)\*\*(?:\s*-\s*(.+))?$/,
+    )
     if (activityMatch) {
       result.activities.push({
-        rank: parseInt(activityMatch[1]),
-        name: activityMatch[2].trim(),
-        type: activityMatch[3].trim(),
+        name: activityMatch[1].trim(),
+        type: activityMatch[2]?.trim() ?? "",
         address: "",
         rating: "",
         reviews: "",
@@ -552,27 +557,28 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
   return (
     <div className="space-y-4">
       {sections.notice && (
-        <p className="rounded-xl border border-blue-500/40 bg-blue-500/10 p-4 text-sm text-blue-100">
+        <p className="rounded-xl border border-travel-border bg-travel-accent-soft p-4 text-sm text-travel-accent">
           {sections.notice}
         </p>
       )}
-      {/* Success Header */}
-      {sections.intro && (
-        <div className="flex items-center gap-3 rounded-xl border border-[#3ce98a]/30 bg-linear-to-r from-[#3ce98a]/20 to-[#5feb9b]/10 p-4">
-          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-[#3ce98a]">
-            <span className="text-xl">🎉</span>
-          </div>
-          <div>
-            <p className="font-semibold text-white">{sections.intro}</p>
-            {sections.totalCost && (
-              <p className="text-sm text-[#5feb9b]">
-                Total trip cost:{" "}
-                <span className="font-bold text-white">
-                  {sections.totalCost}
-                </span>
-              </p>
-            )}
-          </div>
+      {(sections.intro || sections.totalCost) && (
+        <div className="rounded-xl border border-travel-border p-4">
+          {sections.intro && (
+            <h3
+              data-trip-result-heading
+              className="font-semibold text-travel-text"
+            >
+              {sections.intro}
+            </h3>
+          )}
+          {sections.totalCost && (
+            <p className="text-sm text-travel-muted">
+              Total trip cost:{" "}
+              <span className="font-semibold text-travel-text">
+                {sections.totalCost}
+              </span>
+            </p>
+          )}
         </div>
       )}
 
@@ -580,22 +586,24 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
       {(sections.flightCost || sections.hotelCost) && (
         <div className="grid grid-cols-2 gap-3">
           {sections.flightCost && (
-            <div className="flex items-center gap-3 rounded-lg border border-gray-700 bg-[#2a2a2a] p-3">
-              <Plane className="h-5 w-5 text-[#5feb9b]" />
+            <div className="flex items-center gap-3 rounded-lg border border-travel-border bg-travel-surface p-3">
+              <Plane className="h-5 w-5 text-travel-accent" />
               <div>
-                <p className="text-xs text-gray-400">Flights</p>
-                <p className="font-semibold text-white">
+                <p className="text-xs text-travel-muted">Flights</p>
+                <p className="font-semibold text-travel-text">
                   {sections.flightCost}
                 </p>
               </div>
             </div>
           )}
           {sections.hotelCost && (
-            <div className="flex items-center gap-3 rounded-lg border border-gray-700 bg-[#2a2a2a] p-3">
-              <Hotel className="h-5 w-5 text-[#5feb9b]" />
+            <div className="flex items-center gap-3 rounded-lg border border-travel-border bg-travel-surface p-3">
+              <Hotel className="h-5 w-5 text-travel-accent" />
               <div>
-                <p className="text-xs text-gray-400">Hotel</p>
-                <p className="font-semibold text-white">{sections.hotelCost}</p>
+                <p className="text-xs text-travel-muted">Hotel</p>
+                <p className="font-semibold text-travel-text">
+                  {sections.hotelCost}
+                </p>
               </div>
             </div>
           )}
@@ -607,7 +615,6 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
         Object.keys(sections.outboundFlight).length > 0 && (
           <FlightCard
             title="Outbound Flight"
-            icon="🛫"
             flight={sections.outboundFlight}
           />
         )}
@@ -615,11 +622,7 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
       {/* Return Flight Card */}
       {sections.returnFlight &&
         Object.keys(sections.returnFlight).length > 0 && (
-          <FlightCard
-            title="Return Flight"
-            icon="🛬"
-            flight={sections.returnFlight}
-          />
+          <FlightCard title="Return Flight" flight={sections.returnFlight} />
         )}
 
       {/* Hotel Card */}
@@ -629,29 +632,25 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
 
       {/* Activities Card */}
       {sections.activities && sections.activities.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-          <div className="flex items-center gap-2 border-b border-gray-700 bg-linear-to-r from-orange-500/20 to-transparent px-4 py-3">
-            <span className="text-lg">🎯</span>
-            <h3 className="font-semibold text-white">Things to Do</h3>
+        <div className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface">
+          <div className="flex items-center gap-2 border-b border-travel-border px-4 py-3">
+            <h3 className="font-semibold text-travel-text">Things to Do</h3>
           </div>
           <div className="space-y-3 p-4">
             {sections.activities.map((activity, idx) => (
               <div
                 key={idx}
-                className="flex items-start gap-3 rounded-lg p-2 transition-colors hover:bg-[#333]"
+                className="flex items-start gap-3 rounded-lg p-2 transition-colors hover:bg-travel-raised"
               >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-orange-500/20 text-sm font-bold text-orange-400">
-                  {idx + 1}
-                </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-white">
+                  <p className="truncate font-medium text-travel-text">
                     {activity.name}
                   </p>
-                  <div className="mt-1 flex items-center gap-3 text-xs text-gray-400">
+                  <div className="mt-1 flex items-center gap-3 text-xs text-travel-muted">
                     {activity.type && <span>{activity.type}</span>}
                     {activity.rating && (
                       <span className="flex items-center gap-1">
-                        <Star className="h-3 w-3 fill-yellow-400 text-yellow-400" />
+                        <Star className="h-3 w-3 fill-current text-travel-warning" />
                         {activity.rating}
                       </span>
                     )}
@@ -666,10 +665,9 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
 
       {/* Trip Summary */}
       {sections.tripSummary && sections.tripSummary.length > 0 && (
-        <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-          <div className="flex items-center gap-2 border-b border-gray-700 bg-linear-to-r from-[#3ce98a]/20 to-transparent px-4 py-3">
-            <span className="text-lg">📋</span>
-            <h3 className="font-semibold text-white">Trip Summary</h3>
+        <div className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface">
+          <div className="flex items-center gap-2 border-b border-travel-border px-4 py-3">
+            <h3 className="font-semibold text-travel-text">Trip Summary</h3>
           </div>
           <div className="space-y-2 p-4">
             {sections.tripSummary
@@ -681,9 +679,9 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
               .map((item, idx) => (
                 <div
                   key={idx}
-                  className="flex items-start gap-2 text-sm text-gray-300"
+                  className="flex items-start gap-2 text-sm text-travel-muted"
                 >
-                  <span className="mt-0.5 text-[#5feb9b]">•</span>
+                  <span className="mt-0.5 text-travel-accent">•</span>
                   <span>
                     {item.replace(
                       /(\d{4})-(\d{2})-(\d{2})/g,
@@ -692,17 +690,6 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
                   </span>
                 </div>
               ))}
-            {sections.totalCost && (
-              <div className="mt-2 flex items-start gap-2 border-t border-gray-700 pt-2 text-sm text-gray-300">
-                <span className="mt-0.5 text-[#5feb9b]">💰</span>
-                <span>
-                  <strong className="text-white">Total Trip Cost:</strong>{" "}
-                  <span className="font-semibold text-[#5feb9b]">
-                    {sections.totalCost}
-                  </span>
-                </span>
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -713,107 +700,100 @@ const FullTripCard: React.FC<{ content: string }> = ({ content }) => {
 // Flights Only Card Component - Card style similar to full trip
 const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
   const data = parseFlightsOnlyResponse(content)
+  if (!data.flightOptions.length) return <SimpleMarkdown content={content} />
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3 rounded-xl border border-blue-500/30 bg-linear-to-r from-blue-500/20 to-blue-600/10 p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-500">
-          <Plane className="h-5 w-5 text-white" />
-        </div>
-        <div>
-          <p className="font-semibold text-white">
-            {data.isOneWay ? "One-Way" : "Round-Trip"} Flights: {data.route}
+      <header className="space-y-1">
+        <h3 data-trip-result-heading className="font-semibold text-travel-text">
+          {data.isOneWay ? "One-Way" : "Round-Trip"} Flights: {data.route}
+        </h3>
+        {data.date && (
+          <p className="text-sm text-travel-muted">
+            {formatDateRange(data.date)}
           </p>
-          <p className="text-sm text-blue-400">{formatDateRange(data.date)}</p>
-        </div>
-      </div>
+        )}
+      </header>
 
       {/* Flight Options - Card style like full trip */}
       <div className="space-y-6">
         {data.flightOptions.map((option, idx) => (
           <div key={idx} className="space-y-3">
             {/* Option Header */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-500 text-sm font-bold text-white">
-                  {option.optionNumber}
-                </span>
-                <span className="font-medium text-white">
+            <div className="flex items-center justify-between gap-2">
+              {data.flightOptions.length > 1 && (
+                <span className="font-medium text-travel-text">
                   Option {option.optionNumber}
                 </span>
-              </div>
-              <span className="rounded-full bg-[#3ce98a]/20 px-4 py-1.5 text-sm font-semibold text-[#5feb9b]">
+              )}
+              <span className="text-sm font-semibold text-travel-accent">
                 {option.price} ({option.priceType})
               </span>
             </div>
 
             {/* Outbound Flight Card */}
             {option.outbound && Object.keys(option.outbound).length > 0 && (
-              <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-                <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-blue-500/20 to-transparent px-4 py-3">
+              <div className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface">
+                <div className="flex items-center justify-between border-b border-travel-border px-4 py-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-lg">🛫</span>
-                    <h3 className="font-semibold text-white">
+                    <h3 className="font-semibold text-travel-text">
                       Outbound Flight
                     </h3>
                   </div>
-                  <span className="rounded-full bg-[#3ce98a]/20 px-3 py-1 text-sm font-semibold text-[#5feb9b]">
-                    {option.price}
-                  </span>
                 </div>
                 <div className="space-y-3 p-4 text-sm">
                   <div className="flex items-center justify-between">
                     {option.outbound.airline && (
                       <div className="flex items-center gap-2">
-                        <span className="text-gray-500">Airline:</span>
-                        <span className="font-medium text-white">
+                        <span className="text-travel-muted">Airline:</span>
+                        <span className="font-medium text-travel-text">
                           {option.outbound.airline}
                         </span>
                       </div>
                     )}
                     {option.outbound.stops && (
                       <div className="flex items-center gap-2">
-                        <span className="text-gray-500">Stops:</span>
+                        <span className="text-travel-muted">Stops:</span>
                         <span
-                          className={`font-medium ${option.outbound.stops.includes("0") || option.outbound.stops.toLowerCase().includes("non-stop") ? "text-[#5feb9b]" : "text-yellow-400"}`}
+                          className={`font-medium ${option.outbound.stops.includes("0") || option.outbound.stops.toLowerCase().includes("non-stop") ? "text-travel-accent" : "text-travel-warning"}`}
                         >
                           {option.outbound.stops}
                         </span>
                       </div>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-4 border-t border-gray-700 pt-2">
+                  <div className="grid grid-cols-2 gap-4 border-t border-travel-border pt-2">
                     {option.outbound.departure && (
                       <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 text-gray-500">
+                        <div className="flex items-center gap-1.5 text-travel-muted">
                           <Calendar className="h-3.5 w-3.5" />
                           <span className="text-xs tracking-wide uppercase">
                             Departure
                           </span>
                         </div>
-                        <p className="font-medium text-white">
+                        <p className="font-medium text-travel-text">
                           {formatDateTime(option.outbound.departure)}
                         </p>
                       </div>
                     )}
                     {option.outbound.arrival && (
                       <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 text-gray-500">
+                        <div className="flex items-center gap-1.5 text-travel-muted">
                           <Clock className="h-3.5 w-3.5" />
                           <span className="text-xs tracking-wide uppercase">
                             Arrival
                           </span>
                         </div>
-                        <p className="font-medium text-white">
+                        <p className="font-medium text-travel-text">
                           {formatDateTime(option.outbound.arrival)}
                         </p>
                       </div>
                     )}
                   </div>
                   {option.outbound.layover && (
-                    <div className="border-t border-gray-700 pt-2 text-gray-400">
-                      🔄 Layover: {option.outbound.layover}
+                    <div className="border-t border-travel-border pt-2 text-travel-muted">
+                      Layover: {option.outbound.layover}
                     </div>
                   )}
                 </div>
@@ -824,11 +804,10 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
             {!data.isOneWay &&
               option.returnFlight &&
               Object.keys(option.returnFlight).length > 0 && (
-                <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-                  <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-purple-500/20 to-transparent px-4 py-3">
+                <div className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface">
+                  <div className="flex items-center justify-between border-b border-travel-border px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className="text-lg">🛬</span>
-                      <h3 className="font-semibold text-white">
+                      <h3 className="font-semibold text-travel-text">
                         Return Flight
                       </h3>
                     </div>
@@ -837,54 +816,54 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
                     <div className="flex items-center justify-between">
                       {option.returnFlight.airline && (
                         <div className="flex items-center gap-2">
-                          <span className="text-gray-500">Airline:</span>
-                          <span className="font-medium text-white">
+                          <span className="text-travel-muted">Airline:</span>
+                          <span className="font-medium text-travel-text">
                             {option.returnFlight.airline}
                           </span>
                         </div>
                       )}
                       {option.returnFlight.stops && (
                         <div className="flex items-center gap-2">
-                          <span className="text-gray-500">Stops:</span>
+                          <span className="text-travel-muted">Stops:</span>
                           <span
-                            className={`font-medium ${option.returnFlight.stops.includes("0") || option.returnFlight.stops.toLowerCase().includes("non-stop") ? "text-[#5feb9b]" : "text-yellow-400"}`}
+                            className={`font-medium ${option.returnFlight.stops.includes("0") || option.returnFlight.stops.toLowerCase().includes("non-stop") ? "text-travel-accent" : "text-travel-warning"}`}
                           >
                             {option.returnFlight.stops}
                           </span>
                         </div>
                       )}
                     </div>
-                    <div className="grid grid-cols-2 gap-4 border-t border-gray-700 pt-2">
+                    <div className="grid grid-cols-2 gap-4 border-t border-travel-border pt-2">
                       {option.returnFlight.departure && (
                         <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 text-gray-500">
+                          <div className="flex items-center gap-1.5 text-travel-muted">
                             <Calendar className="h-3.5 w-3.5" />
                             <span className="text-xs tracking-wide uppercase">
                               Departure
                             </span>
                           </div>
-                          <p className="font-medium text-white">
+                          <p className="font-medium text-travel-text">
                             {formatDateTime(option.returnFlight.departure)}
                           </p>
                         </div>
                       )}
                       {option.returnFlight.arrival && (
                         <div className="space-y-1">
-                          <div className="flex items-center gap-1.5 text-gray-500">
+                          <div className="flex items-center gap-1.5 text-travel-muted">
                             <Clock className="h-3.5 w-3.5" />
                             <span className="text-xs tracking-wide uppercase">
                               Arrival
                             </span>
                           </div>
-                          <p className="font-medium text-white">
+                          <p className="font-medium text-travel-text">
                             {formatDateTime(option.returnFlight.arrival)}
                           </p>
                         </div>
                       )}
                     </div>
                     {option.returnFlight.layover && (
-                      <div className="border-t border-gray-700 pt-2 text-gray-400">
-                        🔄 Layover: {option.returnFlight.layover}
+                      <div className="border-t border-travel-border pt-2 text-travel-muted">
+                        Layover: {option.returnFlight.layover}
                       </div>
                     )}
                   </div>
@@ -900,19 +879,20 @@ const FlightsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
 // Hotels Only Card Component
 const HotelsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
   const data = parseHotelsOnlyResponse(content)
+  if (!data.hotels.length) return <SimpleMarkdown content={content} />
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3 rounded-xl border border-purple-500/30 bg-linear-to-r from-purple-500/20 to-purple-600/10 p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-purple-500">
-          <Hotel className="h-5 w-5 text-white" />
-        </div>
+      <div className="flex items-center gap-3 rounded-xl border border-travel-border bg-travel-surface p-4">
         <div>
-          <p className="font-semibold text-white">
+          <h3
+            data-trip-result-heading
+            className="font-semibold text-travel-text"
+          >
             Top Hotels in {data.location}
-          </p>
-          <p className="text-sm text-purple-400">
+          </h3>
+          <p className="text-sm text-travel-muted">
             {formatDateRange(data.dates)}
           </p>
         </div>
@@ -923,19 +903,21 @@ const HotelsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
         {data.hotels.slice(0, 10).map((hotel, idx) => (
           <div
             key={idx}
-            className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]"
+            className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface"
           >
-            <div className="flex items-center justify-between border-b border-gray-700 bg-[#333] px-4 py-3">
+            <div className="flex items-center justify-between border-b border-travel-border bg-travel-raised px-4 py-3">
               <div className="flex items-center gap-3">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-500/20 text-xs font-bold text-purple-400">
-                  {hotel.rank}
-                </span>
-                <span className="max-w-[200px] truncate font-medium text-white">
+                {data.hotels.length > 1 && (
+                  <span className="text-sm text-travel-muted">
+                    {hotel.rank}.
+                  </span>
+                )}
+                <span className="max-w-[200px] truncate font-medium text-travel-text">
                   {hotel.name}
                 </span>
               </div>
               {hotel.totalPrice && (
-                <span className="rounded-full bg-[#3ce98a]/20 px-3 py-1 text-sm font-semibold text-[#5feb9b]">
+                <span className="text-sm font-semibold text-travel-accent">
                   {hotel.totalPrice}
                 </span>
               )}
@@ -943,29 +925,29 @@ const HotelsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
             <div className="p-4">
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="flex items-center gap-2">
-                  <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-                  <span className="text-white">{hotel.rating}/5</span>
+                  <Star className="h-4 w-4 fill-current text-travel-warning" />
+                  <span className="text-travel-text">{hotel.rating}/5</span>
                   {hotel.stars && (
-                    <span className="text-yellow-400">
+                    <span className="text-travel-warning">
                       {"⭐".repeat(Math.min(parseInt(hotel.stars), 5))}
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <MapPin className="h-4 w-4 text-gray-500" />
-                  <span className="text-gray-400">
+                  <MapPin className="h-4 w-4 text-travel-muted" />
+                  <span className="text-travel-muted">
                     Location: {hotel.locationRating}/5
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-gray-400">
+                  <span className="text-travel-muted">
                     {hotel.pricePerNight}/night
                   </span>
                 </div>
                 {hotel.checkIn && (
                   <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-gray-500" />
-                    <span className="text-gray-400">
+                    <Clock className="h-4 w-4 text-travel-muted" />
+                    <span className="text-travel-muted">
                       Check-in: {hotel.checkIn}
                     </span>
                   </div>
@@ -982,21 +964,19 @@ const HotelsOnlyCard: React.FC<{ content: string }> = ({ content }) => {
 // Activities Only Card Component
 const ActivitiesOnlyCard: React.FC<{ content: string }> = ({ content }) => {
   const data = parseActivitiesOnlyResponse(content)
+  if (!data.activities.length) return <SimpleMarkdown content={content} />
 
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-3 rounded-xl border border-orange-500/30 bg-linear-to-r from-orange-500/20 to-orange-600/10 p-4">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-orange-500">
-          <Activity className="h-5 w-5 text-white" />
-        </div>
+      <div className="flex items-center gap-3 rounded-xl border border-travel-border bg-travel-surface p-4">
         <div>
-          <p className="font-semibold text-white">
+          <h3
+            data-trip-result-heading
+            className="font-semibold text-travel-text"
+          >
             Things to Do in {data.location}
-          </p>
-          <p className="text-sm text-orange-400">
-            Top attractions and activities
-          </p>
+          </h3>
         </div>
       </div>
 
@@ -1005,30 +985,29 @@ const ActivitiesOnlyCard: React.FC<{ content: string }> = ({ content }) => {
         {data.activities.slice(0, 10).map((activity, idx) => (
           <div
             key={idx}
-            className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]"
+            className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface"
           >
             <div className="flex items-start gap-3 p-4">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-orange-500/20 text-sm font-bold text-orange-400">
-                {activity.rank}
-              </span>
               <div className="min-w-0 flex-1">
-                <p className="font-medium text-white">{activity.name}</p>
-                <p className="mt-1 text-sm text-gray-400">{activity.type}</p>
+                <p className="font-medium text-travel-text">{activity.name}</p>
+                <p className="mt-1 text-sm text-travel-muted">
+                  {activity.type}
+                </p>
                 <div className="mt-2 flex items-center gap-4 text-sm">
                   {activity.address && (
-                    <span className="flex items-center gap-1 text-gray-500">
+                    <span className="flex items-center gap-1 text-travel-muted">
                       <MapPin className="h-3 w-3" />
                       {activity.address}
                     </span>
                   )}
                   {activity.rating && (
-                    <span className="flex items-center gap-1 text-yellow-400">
+                    <span className="flex items-center gap-1 text-travel-warning">
                       <Star className="h-3 w-3 fill-yellow-400" />
                       {activity.rating}
                     </span>
                   )}
                   {activity.reviews && (
-                    <span className="text-gray-500">
+                    <span className="text-travel-muted">
                       ({activity.reviews} reviews)
                     </span>
                   )}
@@ -1045,18 +1024,16 @@ const ActivitiesOnlyCard: React.FC<{ content: string }> = ({ content }) => {
 // Flight Card Component (for full trip)
 const FlightCard: React.FC<{
   title: string
-  icon: string
   flight: Record<string, string>
-}> = ({ title, icon, flight }) => {
+}> = ({ title, flight }) => {
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-      <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-blue-500/20 to-transparent px-4 py-3">
+    <div className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface">
+      <div className="flex items-center justify-between border-b border-travel-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-lg">{icon}</span>
-          <h3 className="font-semibold text-white">{title}</h3>
+          <h3 className="font-semibold text-travel-text">{title}</h3>
         </div>
         {flight.price && (
-          <span className="rounded-full bg-[#3ce98a]/20 px-3 py-1 text-sm font-semibold text-[#5feb9b]">
+          <span className="text-sm font-semibold text-travel-accent">
             {flight.price}
           </span>
         )}
@@ -1065,42 +1042,44 @@ const FlightCard: React.FC<{
         <div className="flex items-center justify-between">
           {flight.airline && (
             <div className="flex items-center gap-2">
-              <span className="text-gray-500">Airline:</span>
-              <span className="font-medium text-white">{flight.airline}</span>
+              <span className="text-travel-muted">Airline:</span>
+              <span className="font-medium text-travel-text">
+                {flight.airline}
+              </span>
             </div>
           )}
           {flight.stops && (
             <div className="flex items-center gap-2">
-              <span className="text-gray-500">Stops:</span>
+              <span className="text-travel-muted">Stops:</span>
               <span
-                className={`font-medium ${flight.stops.includes("0") || flight.stops.includes("Non-stop") ? "text-[#5feb9b]" : "text-yellow-400"}`}
+                className={`font-medium ${flight.stops.includes("0") || flight.stops.includes("Non-stop") ? "text-travel-accent" : "text-travel-warning"}`}
               >
                 {flight.stops.includes("0") ? "Non-stop" : flight.stops}
               </span>
             </div>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-4 border-t border-gray-700 pt-2">
+        <div className="grid grid-cols-2 gap-4 border-t border-travel-border pt-2">
           {flight.departure && (
             <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-gray-500">
+              <div className="flex items-center gap-1.5 text-travel-muted">
                 <Calendar className="h-3.5 w-3.5" />
                 <span className="text-xs tracking-wide uppercase">
                   Departure
                 </span>
               </div>
-              <p className="font-medium text-white">
+              <p className="font-medium text-travel-text">
                 {formatDateTime(flight.departure)}
               </p>
             </div>
           )}
           {flight.arrival && (
             <div className="space-y-1">
-              <div className="flex items-center gap-1.5 text-gray-500">
+              <div className="flex items-center gap-1.5 text-travel-muted">
                 <Clock className="h-3.5 w-3.5" />
                 <span className="text-xs tracking-wide uppercase">Arrival</span>
               </div>
-              <p className="font-medium text-white">
+              <p className="font-medium text-travel-text">
                 {formatDateTime(flight.arrival)}
               </p>
             </div>
@@ -1114,42 +1093,41 @@ const FlightCard: React.FC<{
 // Hotel Card Component (for full trip)
 const HotelCard: React.FC<{ hotel: Record<string, string> }> = ({ hotel }) => {
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-700 bg-[#2a2a2a]">
-      <div className="flex items-center justify-between border-b border-gray-700 bg-linear-to-r from-purple-500/20 to-transparent px-4 py-3">
+    <div className="overflow-hidden rounded-xl border border-travel-border bg-travel-surface">
+      <div className="flex items-center justify-between border-b border-travel-border px-4 py-3">
         <div className="flex items-center gap-2">
-          <span className="text-lg">🏨</span>
-          <h3 className="font-semibold text-white">Hotel</h3>
+          <h3 className="font-semibold text-travel-text">Hotel</h3>
         </div>
         {hotel.price && (
-          <span className="rounded-full bg-[#3ce98a]/20 px-3 py-1 text-sm font-semibold text-[#5feb9b]">
+          <span className="text-sm font-semibold text-travel-accent">
             {hotel.price}
           </span>
         )}
       </div>
       <div className="p-4">
         {hotel.name && (
-          <h4 className="mb-3 text-lg font-semibold text-white">
+          <h4 className="mb-3 text-lg font-semibold text-travel-text">
             {hotel.name}
           </h4>
         )}
         <div className="grid grid-cols-2 gap-3 text-sm">
           {hotel.rating && (
             <div className="flex items-center gap-2">
-              <Star className="h-4 w-4 fill-yellow-400 text-yellow-400" />
-              <span className="text-white">{hotel.rating}</span>
+              <Star className="h-4 w-4 fill-current text-travel-warning" />
+              <span className="text-travel-text">{hotel.rating}</span>
             </div>
           )}
           {hotel.locationRating && (
             <div className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-gray-500" />
-              <span className="text-white">{hotel.locationRating}</span>
+              <MapPin className="h-4 w-4 text-travel-muted" />
+              <span className="text-travel-text">{hotel.locationRating}</span>
             </div>
           )}
           {hotel.checkIn && (
             <div className="col-span-2 flex items-center gap-2">
-              <Clock className="h-4 w-4 text-gray-500" />
-              <span className="text-gray-400">Check-in:</span>
-              <span className="text-white">{hotel.checkIn}</span>
+              <Clock className="h-4 w-4 text-travel-muted" />
+              <span className="text-travel-muted">Check-in:</span>
+              <span className="text-travel-text">{hotel.checkIn}</span>
             </div>
           )}
         </div>
@@ -1160,10 +1138,35 @@ const HotelCard: React.FC<{ hotel: Record<string, string> }> = ({ hotel }) => {
 
 // Legacy and general replies still support Markdown without injecting provider HTML.
 const SimpleMarkdown: React.FC<{ content: string }> = ({ content }) => (
-  <div className="space-y-2 whitespace-pre-wrap text-gray-300">
+  <div className="space-y-2 whitespace-pre-wrap text-travel-muted [&_a]:text-travel-accent [&_a]:underline [&_a]:underline-offset-2 [&_strong]:text-travel-text">
     <ReactMarkdown>{content}</ReactMarkdown>
   </div>
 )
+
+function budgetHeading(budget: BudgetAssessment) {
+  if (budget.status === "unknown") return "Budget not verified"
+  if (typeof budget.quoted_total !== "number" || !Number.isFinite(budget.limit))
+    return budget.status === "within"
+      ? "Within budget for quoted costs"
+      : "Over budget"
+  const difference =
+    Math.round((budget.quoted_total - budget.limit) * 100) / 100
+  if (difference === 0) return "Quote matches your budget"
+  return `Quote is ${formatFare(Math.abs(difference))} ${difference < 0 ? "under" : "over"} budget`
+}
+
+function OriginalResponse({ content }: { content: string }) {
+  return (
+    <details className="mt-3 text-sm text-travel-muted">
+      <summary className="w-fit cursor-pointer py-1 underline-offset-4 hover:underline">
+        Original response
+      </summary>
+      <div className="mt-2">
+        <SimpleMarkdown content={content} />
+      </div>
+    </details>
+  )
+}
 
 const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
   content,
@@ -1176,54 +1179,67 @@ const TravelResponseWithBudget: React.FC<TravelResponseCardProps> = ({
       ? content.slice(prefix.length)
       : content
   const structured = parseTravelResult(travelResult)
-  const hasQuote =
-    structured &&
-    (structured.total_usd !== null ||
-      structured.flights.some((flight) => flight.total_usd !== null) ||
-      structured.hotels.some(
-        (hotel) => hotel.nightly_usd !== null || hotel.total_usd !== null,
-      ) ||
-      !!structured.airport_alternatives?.length ||
-      !!structured.date_alternatives?.length)
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const hasOriginal = Boolean(
+    body.trim() && body.trim() !== structured?.notice.trim(),
+  )
   return (
     <>
       {budget && (
         <section
           aria-label="Budget assessment"
-          className={`mb-4 rounded-xl border p-4 text-sm ${budget.status === "within" ? "border-emerald-700 bg-emerald-950/30 text-emerald-100" : "border-amber-700 bg-amber-950/30 text-amber-100"}`}
+          className={`mb-4 rounded-xl border p-4 text-sm ${budget.status === "within" ? "border-travel-border bg-travel-accent-soft text-travel-text" : "border-travel-warning-border bg-travel-warning-soft text-travel-warning"}`}
         >
-          <h3 className="mb-1 font-semibold">
+          <h3 className="mb-1 font-semibold">{budgetHeading(budget)}</h3>
+          <p>
             {budget.status === "within"
-              ? "Within quoted-cost budget"
-              : budget.status === "over"
-                ? "Over budget"
-                : "Budget not verified"}
-          </h3>
-          <p>{budget.message}</p>
+              ? budget.message.replace(/^Within quoted-cost budget:\s*/, "")
+              : budget.message}
+          </p>
         </section>
       )}
       {structured ? (
-        <>
-          <StructuredTravelResultCard result={structured} allowFlightControls />
-          {hasQuote && !budget && (
-            <p className="mt-3 text-xs text-gray-400">
-              Confirm prices and availability before booking.
-            </p>
-          )}
-          <details
-            open={structured.kind !== "flight_only"}
-            className="mt-4 rounded-xl border border-gray-700 px-4 py-2"
-          >
-            <summary className="cursor-pointer font-medium text-gray-200">
-              Travel notes
-            </summary>
-            <div className="mt-3 text-sm whitespace-pre-wrap text-gray-300">
-              <ReactMarkdown>{body}</ReactMarkdown>
-            </div>
-          </details>
-        </>
+        <StructuredTravelResultCard
+          result={structured}
+          allowFlightControls
+          saveFlights
+          headerAction={
+            hasOriginal && (
+              <ActionMenu
+                label="Result actions"
+                icon={<Ellipsis aria-hidden="true" className="size-5" />}
+                buttonClassName="flex size-10 items-center justify-center rounded-lg text-travel-muted hover:bg-travel-selected hover:text-travel-text focus-visible:outline-2 focus-visible:outline-travel-accent"
+                panelClassName="absolute right-0 top-full z-20 mt-1 min-w-44 rounded-lg border border-travel-border bg-travel-surface p-1 shadow-lg"
+                actions={[
+                  {
+                    label: detailsOpen
+                      ? "Hide original response"
+                      : "Original response",
+                    onSelect: () => setDetailsOpen((open) => !open),
+                  },
+                ]}
+              />
+            )
+          }
+          responseDetails={
+            hasOriginal &&
+            detailsOpen && (
+              <section
+                aria-label="Original response"
+                className="rounded-lg border border-travel-border bg-travel-surface p-3 text-sm"
+              >
+                <SimpleMarkdown content={body} />
+              </section>
+            )
+          }
+        />
       ) : (
-        <TravelResponseCard content={body} />
+        <>
+          <TravelResponseCard content={body} />
+          {detectResponseType(body) !== "simple" && (
+            <OriginalResponse content={body} />
+          )}
+        </>
       )}
     </>
   )
